@@ -1,0 +1,88 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "corbelity-model-workbench"
+version = "0.1.0"
+description = "A browser workbench for running one prompt across text, image and speech models and comparing latency, tokens, cost and output."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Corbelity LLC" }]
+keywords = [
+    "llm", "anthropic", "openrouter", "ollama", "huggingface",
+    "multimodal", "evaluation", "comparison", "workbench",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# The workbench installs every provider SDK (the `all` extra) because the UI offers every
+# provider. Someone who only wants one can depend on corbelity-model-client directly.
+dependencies = [
+    "corbelity-model-client[all]>=0.1.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "python-dotenv>=1.0",
+]
+
+[project.scripts]
+corbelity-workbench = "corbelity.workbench.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/Corbelity/model-workbench"
+Source = "https://github.com/Corbelity/model-workbench"
+Issues = "https://github.com/Corbelity/model-workbench/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+# Until corbelity-model-client is published to PyPI, uv resolves it from GitHub.
+# Developing both repos side by side? Swap in the sibling checkout instead:
+#   corbelity-model-client = { path = "../model-client", editable = true }
+[tool.uv.sources]
+corbelity-model-client = { git = "https://github.com/Corbelity/model-client" }
+
+[tool.hatch.build.targets.wheel]
+# `corbelity` is an implicit namespace package (PEP 420) with no __init__.py, exactly as
+# in corbelity-model-client, so the two install side by side without shadowing each other.
+# Everything under src/corbelity/workbench -- including static/ -- ships in the wheel.
+packages = ["src/corbelity"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Warnings are errors, so a deprecation in our own code fails the suite while it is still
+# cheap to fix rather than turning into a break on some later dependency bump.
+#
+# The single exception is third party and has no released fix: anyio 4.15 deprecated the
+# anyio.abc.BlockingPortal alias, and every starlette up to 1.6.0 reads it at module scope
+# in starlette/testclient.py, so importing TestClient warns. Starlette merged the fix
+# (Kludex/starlette#3498) but has not shipped it. The filter names the exact message,
+# category and module so nothing else slips through with it.
+#
+# To drop this once a fixed starlette ships:
+#     python -W error::DeprecationWarning -c "import starlette.testclient"
+# If that exits cleanly, delete the ignore line below.
+filterwarnings = [
+    "error",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning:starlette.testclient",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
