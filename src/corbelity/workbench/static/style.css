@@ -1,0 +1,952 @@
+/* Corbelity Model Workbench
+   ---------------------------------------------------------------------------
+   BRAND TOKENS. Every colour, typeface and shared measurement in this file comes from
+   the :root block below, so re-skinning the workbench means editing :root and nothing
+   else. If you find a raw hex or rgba() value further down, that is a bug.
+
+   The --cb-* values and the space/radius scales below are copied verbatim from the
+   Corbelity design system's "Network Node" theme. They are not tuned here -- if the design
+   system changes, this block is the only place that changes with it.
+
+   Two deliberate deviations, each noted at the token that carries it: the surface ramp and
+   the secondary-button text colour. */
+
+:root {
+    color-scheme: dark;
+
+    /* Brand -- Network Node theme, verbatim. */
+    --cb-bg: #081424;             /* page background, dominant surface */
+    --cb-surface: #1C2736;        /* cards, inputs, panels */
+    --cb-deep: #072C46;           /* section dividers */
+    --cb-mid: #0A203B;            /* supporting fills -- NOT for text */
+    --cb-primary: #297E90;        /* buttons, links; large text/icons only, not body copy */
+    --cb-primary-hover: #4991A1;
+    --cb-primary-active: #236B7A;
+    --cb-rose: #1F5972;           /* this theme's remap of the rose slot */
+    --cb-accent: #46A0AE;         /* secondary text, highlights -- 4.7-6.1:1 on dark */
+    --cb-text: #F9F9F9;           /* 17.6:1 on the background */
+    --cb-text-inverse: #193758;   /* for light-background variants */
+    --cb-border: #343E4B;
+
+    /* Spacing and radius scales, shared across both brand themes. */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 32px;
+    --space-7: 48px;
+    --space-8: 64px;
+    --radius-sm: 6px;
+    --radius-md: 12px;
+    --radius-lg: 20px;
+    --radius-pill: 999px;
+
+    /* DEVIATION: the design system defines one --surface, which is all a document needs.
+       This UI stacks page > sidebar > card > recessed input, so it needs four levels. Rather
+       than invent tints, each level is an existing brand token, ordered by lightness. */
+    --bg-dark: var(--cb-bg);
+    --bg-sidebar: var(--cb-mid);      /* "supporting fills" -- a fill, not text */
+    --bg-card: var(--cb-surface);     /* the design system's own cards/inputs/panels */
+    --bg-input: var(--cb-bg);         /* recessed back to page level inside a card */
+    --border-color: var(--cb-border);
+
+    --text-main: var(--cb-text);
+    /* The design system sets muted text to the accent teal in this theme, so labels, hints
+       and placeholders are teal here. 6.1:1 on the page, 4.9:1 on a card. */
+    --text-muted: var(--cb-accent);
+
+    /* The two teals are not interchangeable: --cb-primary is 3.95:1 on the background, so it
+       carries fills, borders and icons, never small text. --cb-accent is 6.07:1 and carries
+       text. Primary buttons are white on --cb-primary (4.69:1), per the design system. */
+    --accent: var(--cb-accent);
+    --accent-hover: var(--cb-primary-hover);
+    --accent-soft: rgba(70, 160, 174, 0.14);
+    --accent-line: var(--cb-primary);
+    --on-accent: var(--cb-text);
+
+    /* Status colours. Not in the brand -- it defines no error or warning role -- but a tool
+       that reports provider failures needs them. Both clear AA on the background (8.6:1 and
+       7.2:1) and stay clear of the teals so a warning never reads as chrome. */
+    --warn: #f59e0b;
+    --danger: #f87171;
+
+    /* Neutral overlays */
+    --hover-wash: rgba(255, 255, 255, 0.07);
+    --overlay: rgba(8, 20, 36, 0.85);
+
+    --radius: var(--radius-md);
+    /* Montserrat 700/800 headings, Inter 400/500/600 body -- the confirmed pairing for this
+       theme. Fira Code is NOT in the brand: it names no monospace, and this UI needs one for
+       code output and the payload drawer. */
+    --font-display: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'Fira Code', ui-monospace, 'Cascadia Code', Consolas, monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* Form controls do not inherit the page font on their own. */
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+}
+
+body {
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+}
+
+code,
+pre,
+kbd,
+samp {
+    font-family: var(--font-mono);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+}
+
+/* SIDEBAR STYLING */
+.sidebar {
+    width: 340px;
+    background-color: var(--bg-sidebar);
+    border-right: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-header {
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    color: inherit;
+    text-decoration: none;
+}
+
+/* Height-driven: the mark is not square, so fixing both axes would stretch it -- which the
+   brand's logo rules forbid. */
+.brand-mark {
+    height: 40px;
+    width: auto;
+    flex-shrink: 0;
+    display: block;
+}
+
+.brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+/* The lockup is all-caps CORBELITY in Montserrat ExtraBold. Tracking is positive here
+   because the negative value tuned for mixed case closes up capitals too far. */
+.brand-name {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 1.1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.brand-product {
+    margin-top: 3px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* badge-neutral from the design system: surface fill, hairline border, muted text. */
+.badge {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    padding: 3px 9px;
+    border-radius: var(--radius-pill);
+    font-weight: 600;
+}
+
+.sidebar-content {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.control-group {
+    margin-bottom: 22px;
+}
+
+.control-group label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.label-with-value {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.slider-val {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+}
+
+.input-control {
+    width: 100%;
+    padding: 10px 12px;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-main);
+    font-size: 0.85rem;
+    outline: none;
+}
+
+.input-control::placeholder {
+    color: var(--text-muted);
+    opacity: 0.75;
+}
+
+.input-control:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input-control:disabled {
+    cursor: not-allowed;
+}
+
+/* Modality Pills */
+.modality-pills {
+    display: flex;
+    gap: 6px;
+    background: var(--bg-input);
+    padding: 4px;
+    border-radius: var(--radius);
+}
+
+.pill-btn {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 8px 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.pill-btn:hover:not(.active) {
+    color: var(--text-main);
+    background: var(--hover-wash);
+}
+
+.pill-btn.active {
+    background: var(--accent);
+    color: var(--on-accent);
+}
+
+/* Range Inputs */
+input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    background: var(--bg-input);
+    height: 6px;
+    border-radius: 3px;
+}
+
+.api-keys-group summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+/* Explanatory text under a control. Used for the slider hints and the API-key note --
+   always visible rather than hidden behind a hover, so it needs no discovery and works
+   the same on touch. */
+.field-hint {
+    margin-top: var(--space-2);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.key-inputs {
+    margin-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.env-badge {
+    font-size: 0.65rem;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: var(--border-color);
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.env-badge.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent-line);
+}
+
+.preset-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+/* MAIN CANVAS */
+.main-canvas {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-dark);
+    overflow-y: auto;
+    padding: 24px 32px;
+}
+
+.canvas-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.canvas-header h2 {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.status-indicator {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--accent);
+}
+
+.status-indicator.busy .status-dot {
+    background-color: var(--warn);
+}
+
+.prompt-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.block-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.hint {
+    font-weight: 400;
+}
+
+.textarea-control {
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    color: var(--text-main);
+    padding: 12px;
+    font-size: 0.9rem;
+    line-height: 1.55;
+    resize: vertical;
+    outline: none;
+}
+
+.textarea-control:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.action-row {
+    display: flex;
+    gap: 12px;
+}
+
+/* Buttons follow the design system: 12px radius, 1.5px transparent border so primary and
+   secondary share a box, weight 600, and white on --cb-primary. */
+.btn-primary {
+    background: var(--cb-primary);
+    color: var(--on-accent);
+    border: 1.5px solid transparent;
+    padding: 11px 26px;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--cb-primary-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+    background: var(--cb-primary-active);
+}
+
+/* btn-disabled from the design system: border fill, muted text. */
+.btn-primary:disabled {
+    background: var(--border-color);
+    color: var(--text-muted);
+    cursor: progress;
+}
+
+/* DEVIATION: the design system's btn-secondary is transparent with --cb-primary text and
+   border. The border is right, but --cb-primary as TEXT is 3.95:1 on this background --
+   below AA, and the palette note itself reserves that colour for "large text, icons,
+   borders". These buttons are 0.8rem. So the border stays --cb-primary and the label takes
+   --cb-accent (6.07:1). Worth fixing in the design system rather than only here. */
+.btn-secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1.5px solid var(--accent-line);
+    padding: 8px 16px;
+    border-radius: var(--radius-md);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--cb-primary);
+    color: var(--on-accent);
+}
+
+.btn-secondary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+a.btn-secondary {
+    display: inline-block;
+    text-decoration: none;
+}
+
+.text-btn {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.text-btn:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+
+/* RESULTS DISPLAY */
+.results-section {
+    flex: 1;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.results-section h3 {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.results-container {
+    min-height: 180px;
+    padding: 16px;
+    background: var(--bg-dark);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    margin-top: 12px;
+    overflow-x: auto;
+}
+
+.placeholder-text {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    margin-top: 60px;
+}
+
+.result-error {
+    color: var(--danger);
+    padding: 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Multi-modal Outputs */
+.result-media {
+    text-align: center;
+}
+
+.result-media .btn-secondary {
+    margin-top: 12px;
+}
+
+.result-heading {
+    margin-bottom: 12px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.result-image {
+    max-width: 100%;
+    max-height: 450px;
+    border-radius: var(--radius);
+    display: block;
+    margin: 0 auto;
+}
+
+.result-audio {
+    width: 100%;
+    margin-top: 16px;
+}
+
+/* Rendered model output. The reset above strips list indents and paragraph spacing from
+   everything, so markdown needs its own rhythm put back. */
+.markdown-body {
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+
+.markdown-body > * + * {
+    margin-top: 0.9em;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+    margin-top: 1.4em;
+    font-family: var(--font-display);
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.markdown-body h1 { font-size: 1.4rem; }
+.markdown-body h2 { font-size: 1.2rem; }
+.markdown-body h3 { font-size: 1.05rem; }
+.markdown-body h4 { font-size: 0.95rem; }
+
+.markdown-body ul,
+.markdown-body ol {
+    padding-left: 1.5em;
+}
+
+.markdown-body li + li {
+    margin-top: 0.3em;
+}
+
+.markdown-body a {
+    color: var(--accent);
+}
+
+.markdown-body blockquote {
+    border-left: 3px solid var(--accent-line);
+    padding-left: 1em;
+    color: var(--text-muted);
+}
+
+.markdown-body code {
+    background: var(--bg-card);
+    padding: 0.15em 0.4em;
+    border-radius: 5px;
+    font-size: 0.88em;
+}
+
+.markdown-body pre {
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    overflow-x: auto;
+}
+
+.markdown-body pre code,
+.markdown-body pre code.hljs {
+    background: none;
+    padding: 0;
+    font-size: 0.82rem;
+}
+
+.markdown-body table {
+    display: block;
+    overflow-x: auto;
+    border-collapse: collapse;
+}
+
+.markdown-body th,
+.markdown-body td {
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    text-align: left;
+}
+
+.markdown-body th {
+    background: var(--bg-card);
+}
+
+.markdown-body hr {
+    border: none;
+    border-top: 1px solid var(--border-color);
+}
+
+.plain-output {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* METRICS BAR */
+.metrics-bar {
+    display: flex;
+    gap: 28px;
+    background: var(--bg-card);
+    padding: 12px 20px;
+    border-radius: var(--radius);
+    margin-top: 16px;
+    border: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.metrics-bar strong {
+    color: var(--text-main);
+    font-family: var(--font-mono);
+    font-weight: 500;
+}
+
+.metrics-bar.hidden {
+    display: none;
+}
+
+/* REQUEST PAYLOAD DRAWER */
+.context-drawer {
+    margin-top: 16px;
+    background: var(--bg-dark);
+    padding: 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+}
+
+.context-drawer summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.context-drawer pre {
+    margin-top: 12px;
+    max-height: 250px;
+    overflow: auto;
+    font-size: 0.78rem;
+}
+
+.context-drawer pre code.hljs {
+    background: none;
+    padding: 0;
+}
+
+.hidden {
+    display: none;
+}
+
+/* ---------------------------------------------------------------- */
+/* CONVERSATION CONTEXT                                             */
+/* ---------------------------------------------------------------- */
+.context-summary {
+    color: var(--text-muted);
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 6px;
+}
+
+.context-summary.warn { color: var(--warn); }
+.context-summary.danger { color: var(--danger); }
+
+.context-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.context-check {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 0;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.context-check input { cursor: pointer; }
+
+.context-list {
+    max-height: 260px;
+    overflow-y: auto;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.context-block.is-empty .context-list {
+    max-height: none;
+    padding: 10px;
+}
+
+.context-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
+}
+
+.context-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+}
+
+.context-role {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-top: 1px;
+}
+
+.context-role.user {
+    color: var(--accent);
+    background-color: var(--accent-soft);
+}
+
+.context-role.assistant {
+    color: var(--text-muted);
+    background-color: var(--hover-wash);
+}
+
+.context-content {
+    flex: 1;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-main);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 4.4em;
+    overflow: hidden;
+}
+
+.context-content.expanded { max-height: none; }
+
+.context-edit {
+    flex: 1;
+    background-color: var(--bg-input);
+    color: var(--text-main);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 13px;
+    resize: vertical;
+}
+
+.context-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.icon-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1;
+    padding: 3px 5px;
+    border-radius: 4px;
+}
+
+.icon-btn:hover {
+    color: var(--text-main);
+    background-color: var(--hover-wash);
+}
+
+.icon-btn.danger:hover { color: var(--danger); }
+
+/* IMAGE ATTACHMENTS - sit with the prompt, because the image belongs to it */
+.attach-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.attach-row .btn-secondary { flex: 0 0 auto; }
+
+.attach-url { flex: 1 1 220px; min-width: 160px; }
+
+.attach-summary {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.attach-summary.warn { color: var(--warn); }
+
+.attach-row.disabled { opacity: 0.45; }
+
+.attach-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.attach-list:empty { display: none; }
+
+.attach-item {
+    position: relative;
+    width: 92px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    background: var(--bg-input);
+    overflow: hidden;
+}
+
+/* Greyed rather than removed: silently deleting a user's file because they switched
+   model is hostile. The send is blocked, which is enough. */
+.attach-item.blocked { opacity: 0.45; }
+
+.attach-item img {
+    width: 100%;
+    height: 64px;
+    object-fit: cover;
+    display: block;
+}
+
+.attach-fallback {
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+}
+
+.attach-name {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 4px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.attach-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    line-height: 1;
+    border: none;
+    border-radius: 50%;
+    background: var(--overlay);
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.attach-remove:hover { color: var(--danger); }
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+    }
+}

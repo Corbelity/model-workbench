@@ -1,0 +1,68 @@
+Corbelity Model Workbench
+Copyright 2026 Corbelity LLC
+
+This product includes software developed at Corbelity LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+---
+
+This project builds on Corbelity Model Client, which is licensed under the
+Apache License, Version 2.0 and carries the following notice:
+
+    Corbelity Model Client
+    Copyright 2026 Corbelity LLC
+
+    This product includes software developed at Corbelity LLC.
+
+    This project calls third-party model APIs through their official SDKs,
+    each of which carries its own license and terms of service. Those SDKs
+    are optional dependencies and are not redistributed here. Provider names
+    are the trademarks of their respective owners and are used only to
+    identify the service being called.
+
+---
+
+The browser interface loads the following third-party components at runtime
+from public CDNs. They are not redistributed here, and each carries its own
+license. Versions are pinned in index.html and the licenses below are the
+ones those versions carry:
+
+    marked 12.0.2
+        MIT License
+        Copyright (c) 2018+, MarkedJS
+        Copyright (c) 2011-2018, Christopher Jeffrey
+        Its license file also reproduces the BSD-style notice of the
+        original Markdown, Copyright (c) 2004, John Gruber.
+
+    DOMPurify 3.1.6
+        Dual licensed: Apache License, Version 2.0, or
+        Mozilla Public License, Version 2.0, at your option
+        Copyright 2024 Dr.-Ing. Mario Heiderich, Cure53
+        Note: DOMPurify dropped the Mozilla option in 3.4.0 and is
+        Apache-2.0 only from that release on, so this entry must be
+        rechecked whenever the pinned version changes.
+
+    highlight.js 11.8.0, including its night-owl stylesheet
+        BSD 3-Clause License
+        Copyright (c) 2006, Ivan Sagalaev
+
+The interface also loads the Montserrat, Inter and Fira Code typefaces from
+Google Fonts, each licensed under the SIL Open Font License, Version 1.1:
+
+    Montserrat   Copyright The Montserrat Project Authors
+    Inter        Copyright 2016 The Inter Project Authors
+    Fira Code    Copyright 2014-2020 The Fira Code Project Authors
+
+Provider names are the trademarks of their respective owners and are used
+only to identify the service being called.

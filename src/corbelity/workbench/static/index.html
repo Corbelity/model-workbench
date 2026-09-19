@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#081424">
+    <title>Corbelity Model Workbench</title>
+    <link rel="icon" href="/static/favicon.png" type="image/png">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <!-- Montserrat: logotype and headings (ExtraBold is the wordmark weight).
+         Inter: body, the confirmed pairing for this logo direction.
+         Fira Code: code output. None are system fonts, so this needs the network to look
+         right; each var() in style.css carries a fallback stack for when it doesn't. -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;500;600&family=Montserrat:wght@700;800&display=swap"
+        rel="stylesheet">
+    <!-- Pinned: an unpinned CDN script changes behaviour whenever upstream publishes. -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+    <!-- Model output is untrusted. It is rendered as markdown and sanitized before it
+         touches the DOM; app.js refuses to render HTML if DOMPurify failed to load. -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/night-owl.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <a class="brand" href="/" aria-label="Corbelity Model Workbench">
+                    <!-- The Network Node mark. Raster because the brand asset is a raster
+                         crop; served at 3x the display size so it stays sharp on hidpi.
+                         Displayed at 40px, not the brand's 24px minimum: below ~36px the
+                         faint lower-left nodes stop reading and the C closes up. -->
+                    <img class="brand-mark" src="/static/corbelity-mark.png" alt="">
+                    <span class="brand-text">
+                        <span class="brand-name">Corbelity</span>
+                        <span class="brand-product">Model Workbench</span>
+                    </span>
+                </a>
+            </div>
+
+            <div class="sidebar-content">
+                <!-- Model Selection -->
+                <div class="control-group">
+                    <div class="label-with-value">
+                        <label for="modelSelect">Model</label>
+                        <span id="serviceBadge" class="badge">Service: --</span>
+                    </div>
+                    <select id="modelSelect" class="input-control">
+                        <option value="">Loading models…</option>
+                    </select>
+                </div>
+
+                <!-- Modality Selection -->
+                <div class="control-group">
+                    <label id="modalityLabel">Output modality</label>
+                    <div class="modality-pills" role="group" aria-labelledby="modalityLabel">
+                        <button class="pill-btn active" data-modality="text" aria-pressed="true">Text</button>
+                        <button class="pill-btn" data-modality="image" aria-pressed="false">Image</button>
+                        <button class="pill-btn" data-modality="sound" aria-pressed="false">Sound</button>
+                    </div>
+                </div>
+
+                <!-- Sliders -->
+                <div class="control-group">
+                    <div class="label-with-value">
+                        <label for="tempSlider">Temperature</label>
+                        <span id="tempValue" class="slider-val">0.70</span>
+                    </div>
+                    <input type="range" id="tempSlider" min="0" max="2" step="0.05" value="0.7"
+                        aria-describedby="tempHint">
+                    <p id="tempHint" class="field-hint">How much randomness the model is allowed:
+                        low values make it pick the most likely next word, high values let it take
+                        chances.</p>
+                </div>
+
+                <div class="control-group">
+                    <div class="label-with-value">
+                        <label for="topPSlider">Top P</label>
+                        <span id="topPValue" class="slider-val">0.90</span>
+                    </div>
+                    <input type="range" id="topPSlider" min="0" max="1" step="0.05" value="0.9"
+                        aria-describedby="topPHint">
+                    <p id="topPHint" class="field-hint">Keeps only the most likely words whose
+                        probabilities add up to this value, so lower numbers narrow the model's
+                        choices.</p>
+                </div>
+
+                <div class="control-group">
+                    <div class="label-with-value">
+                        <label for="maxTokensInput">Max tokens</label>
+                        <span id="tokensValue" class="slider-val">2048</span>
+                    </div>
+                    <input type="range" id="maxTokensInput" min="64" max="8192" step="64" value="2048"
+                        aria-describedby="tokensHint">
+                    <p id="tokensHint" class="field-hint">The ceiling on how long the reply can be;
+                        the model stops once it reaches this many tokens, even mid-sentence.</p>
+                </div>
+
+                <!-- API key overrides, with a badge showing which keys the server already has -->
+                <!-- Collapsed by default: most runs use the keys already in the server's
+                     .env, so this only needs opening to override one for a session. -->
+                <details class="control-group api-keys-group">
+                    <summary>API keys &amp; endpoint overrides</summary>
+                    <div class="key-inputs">
+                        <div class="key-row">
+                            <input type="password" id="openrouterKey" class="input-control" autocomplete="off"
+                                placeholder="OpenRouter API key (override)">
+                            <span id="openrouterBadge" class="env-badge" title="Lit when the server has this key in its environment">.env</span>
+                        </div>
+                        <div class="key-row">
+                            <input type="password" id="anthropicKey" class="input-control" autocomplete="off"
+                                placeholder="Anthropic API key (override)">
+                            <span id="anthropicBadge" class="env-badge" title="Lit when the server has this key in its environment">.env</span>
+                        </div>
+                        <div class="key-row">
+                            <input type="password" id="huggingfaceKey" class="input-control" autocomplete="off"
+                                placeholder="HuggingFace token (override)">
+                            <span id="huggingfaceBadge" class="env-badge" title="Lit when the server has this key in its environment">.env</span>
+                        </div>
+                        <div class="key-row">
+                            <input type="text" id="ollamaUrl" class="input-control" autocomplete="off"
+                                placeholder="Local Ollama URL: http://localhost:11434">
+                        </div>
+                    </div>
+                    <p class="field-hint">Overrides are saved in this browser's local storage. For anything
+                        long-lived, put the key in the server's <code>.env</code> instead.</p>
+                </details>
+
+                <!-- Presets -->
+                <div class="control-group">
+                    <label>Quick presets</label>
+                    <div class="preset-buttons">
+                        <button class="btn-secondary" data-preset="text">Text</button>
+                        <button class="btn-secondary" data-preset="creative">Creative</button>
+                        <button class="btn-secondary" data-preset="image">Image</button>
+                        <button class="btn-secondary" data-preset="audio">Audio</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CANVAS -->
+        <main class="main-canvas">
+            <header class="canvas-header">
+                <h2>Prompt &amp; Execution Canvas</h2>
+                <div id="statusIndicator" class="status-indicator" role="status">
+                    <span class="status-dot"></span> <span id="statusText">Ready</span>
+                </div>
+            </header>
+
+            <section class="prompt-section">
+                <div class="input-block">
+                    <div class="block-label">
+                        <label for="systemPrompt">System instruction</label>
+                        <button id="toggleSystemBtn" class="text-btn">Collapse</button>
+                    </div>
+                    <textarea id="systemPrompt" class="textarea-control" rows="2"
+                        placeholder="Define a system persona or guidelines…"></textarea>
+                </div>
+
+                <!-- CONVERSATION CONTEXT - prior turns sent with each call -->
+                <div id="contextBlock" class="input-block context-block is-empty">
+                    <div class="block-label">
+                        <span>Conversation context <span id="contextSummary" class="context-summary">empty</span></span>
+                        <span class="context-controls">
+                            <label class="context-check" title="Uncheck to run a prompt without adding it to the conversation">
+                                <input type="checkbox" id="appendContextToggle" checked>
+                                Append responses
+                            </label>
+                            <button id="copyContextBtn" class="text-btn" title="Copy the conversation as JSON">Copy</button>
+                            <button id="clearContextBtn" class="text-btn" title="Remove all turns">Clear all</button>
+                        </span>
+                    </div>
+                    <div id="contextList" class="context-list">
+                        <div class="context-empty">No prior turns. Responses are appended here automatically.</div>
+                    </div>
+                </div>
+
+                <div class="input-block">
+                    <div class="block-label">
+                        <label for="userPrompt">User prompt</label>
+                        <span class="hint">Press Ctrl + Enter to run</span>
+                    </div>
+                    <textarea id="userPrompt" class="textarea-control main-prompt" rows="5"
+                        placeholder="Enter your prompt here…"></textarea>
+
+                    <!-- IMAGE ATTACHMENTS - current turn only; never stored in the conversation -->
+                    <div id="attachRow" class="attach-row">
+                        <button id="attachBtn" type="button" class="btn-secondary">Attach</button>
+                        <input type="file" id="attachInput" multiple hidden
+                            accept="image/png,image/jpeg,image/gif,image/webp">
+                        <input type="text" id="attachUrl" class="input-control attach-url"
+                            placeholder="Image URL (https://…)" aria-label="Image URL">
+                        <button id="attachUrlBtn" type="button" class="btn-secondary">Add</button>
+                        <span id="attachSummary" class="attach-summary"></span>
+                    </div>
+                    <div id="attachList" class="attach-list"></div>
+                </div>
+
+                <div class="action-row">
+                    <button id="executeBtn" class="btn-primary">Run</button>
+                    <button id="clearBtn" class="btn-secondary">Clear</button>
+                </div>
+            </section>
+
+            <!-- RESULTS DISPLAY -->
+            <section class="results-section">
+                <h3>Output</h3>
+
+                <div id="resultsContainer" class="results-container" aria-live="polite">
+                    <div class="placeholder-text">Run a prompt to see text, image, or sound results here.</div>
+                </div>
+
+                <!-- METRICS & COST BAR -->
+                <div id="metricsBar" class="metrics-bar hidden">
+                    <div class="metric-item">
+                        Latency: <strong id="metricTime">0.00s</strong>
+                    </div>
+                    <div class="metric-item">
+                        Tokens: <strong id="metricTokens">0 P / 0 C (0 Total)</strong>
+                    </div>
+                    <div class="metric-item">
+                        Est. cost: <strong id="metricCost">$0.0000</strong>
+                    </div>
+                </div>
+
+                <!-- REQUEST PAYLOAD DRAWER (not the conversation context - see above) -->
+                <details class="context-drawer">
+                    <summary>Show request payload</summary>
+                    <pre><code id="contextJson" class="language-json">// The serialized payload appears here after a run.</code></pre>
+                </details>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
