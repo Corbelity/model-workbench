@@ -12,8 +12,8 @@ HuggingFace, and every call is logged and traced identically whichever provider 
 - **Pick any catalog model** and switch between them mid-conversation. The conversation
   lives in your browser and is sent with each request, so the server stays stateless and
   the same context can be handed to a different model.
-- **Text, image and sound output.** Only HuggingFace produces images and audio today; the
-  other providers are text.
+- **Text, image and sound output.** OpenAI and HuggingFace generate all three; the other
+  providers are text only.
 - **Tune** temperature, top-p and max tokens. For Anthropic models that reject sampling
   parameters, the client drops `temperature` and `top_p` for you instead of returning a 400
   (a catalog entry's `supports_sampling` flag decides; see below).
@@ -60,11 +60,14 @@ is in the [model-client README](https://github.com/Corbelity/model-client#provid
 | Variable | Used for |
 |---|---|
 | `ANTHROPIC_API_KEY` | `anthropic` |
+| `OPENAI_API_KEY` | `openai` — text, image and sound |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | `gemini` |
 | `OPENROUTER_API_KEY` | `openrouter` |
 | `HF_TOKEN` (or `HUGGINGFACE_HUB_KEY`) | `huggingface` — text, image and sound |
 | `OLLAMA_API_KEY` | `ollama` (Ollama Cloud) |
 | `LOCAL_OLLAMA_URL` | `ollama-local` — the host of your own Ollama box |
 | `CORBELITY_MODEL_CATALOG` | path to your own model catalog (see below) |
+| `CORBELITY_SERVICES` | comma-separated allow-list of services to offer (see below) |
 | `TRACE_ENABLED`, `TRACE_FILE` | record every call (see [Tracing](#tracing)) |
 | `WORKBENCH_DEV` | stop the browser caching the UI while you edit it (see below) |
 | `LOGGING_LEVEL` | `DEBUG`, `INFO` (default), `WARNING`… |
@@ -97,11 +100,21 @@ CORBELITY_MODEL_CATALOG=./my-models.json
 ]
 ```
 
-`service` is one of `anthropic`, `openrouter`, `ollama-local`, `ollama` or `huggingface`.
-`modality` is `text`, `image` or `sound`. `accepts_images` gates the attach controls for
-that model. `supports_sampling: false` tells the Anthropic client to omit `temperature` and
-`top_p` for a model that rejects them. A model with no `cost_per_1k_*` reports $0 rather than
-an invented number.
+`service` is one of `anthropic`, `openai`, `gemini`, `openrouter`, `ollama-local`, `ollama`
+or `huggingface`. `modality` is `text`, `image` or `sound`. `accepts_images` gates the
+attach controls for that model. `supports_sampling: false` tells the Anthropic client to
+omit `temperature` and `top_p` for a model that rejects them. A model with no
+`cost_per_1k_*` reports $0 rather than an invented number.
+
+To show only some providers, name them in `CORBELITY_SERVICES`:
+
+```bash
+CORBELITY_SERVICES=openai,ollama-local
+```
+
+That narrows the dropdown and nothing else. It does not disable a service: a request
+naming a filtered-out model is still routed and still runs. Leaving it unset offers
+everything.
 
 The file is re-read on every request, so edit it and refresh the page — no restart. A
 catalog that fails to parse is logged as an error and the built-in list is used instead.

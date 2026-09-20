@@ -33,9 +33,9 @@ from corbelity.model_client import (
     ModelCatalog,
     ModelInfo,
     UnsupportedModalityError,
+    catalog_for,
     get_default_config,
     known_services,
-    load_catalog,
     make_model_client,
     make_trace_logger,
     provider_spec,
@@ -119,6 +119,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # ProviderSpec rather than duplicated here.
 UI_KEY_FIELDS: dict[str, str] = {
     "anthropic": "anthropic_key",
+    "openai": "openai_key",
+    "gemini": "gemini_key",
     "openrouter": "openrouter_key",
     "huggingface": "huggingface_key",
 }
@@ -149,17 +151,20 @@ _DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.+)$", re.DOTA
 
 def load_models() -> ModelCatalog:
     """The catalog the UI offers: the built-in entries, with the user's catalog file (if
-    CORBELITY_MODEL_CATALOG names one) merged over them.
+    CORBELITY_MODEL_CATALOG names one) merged over them, narrowed to CORBELITY_SERVICES
+    when that names an allow-list.
 
-    A user catalog is re-read on every call, so editing the file and refreshing the page is
-    enough. A broken one is logged loudly and skipped rather than emptying the dropdown."""
-    path = CONFIG.catalog_path
+    catalog_for() is the library's listing path and is presentation only -- narrowing what
+    is shown never changes how a call behaves, and a filtered-out service is still
+    callable. A user catalog is re-read on every call, so editing the file and refreshing
+    the page is enough. A broken one is logged loudly and skipped rather than emptying the
+    dropdown; the fallback drops the user catalog, not the service filter."""
     try:
-        return load_catalog(path)
+        return catalog_for(CONFIG)
     except (OSError, ValueError) as err:   # json.JSONDecodeError is a ValueError
         logger.error("Could not load model catalog %s (%s); using the built-in catalog.",
-                     path, err)
-        return load_catalog()
+                     CONFIG.catalog_path, err)
+        return catalog_for(CONFIG.with_overrides(catalog_path=None))
 
 
 class Message(BaseModel):
@@ -192,6 +197,8 @@ class GenerateRequest(BaseModel):
     top_p: float = 0.9
     max_tokens: int = 2048
     anthropic_key: str | None = None
+    openai_key: str | None = None
+    gemini_key: str | None = None
     openrouter_key: str | None = None
     huggingface_key: str | None = None
     ollama_url: str | None = None
@@ -510,16 +517,56 @@ def estimate_cost(model_info: ModelInfo, prompt_tokens: int, completion_tokens: 
     return round((prompt_tokens / 1000.0 * rate_in) + (completion_tokens / 1000.0 * rate_out), 6)
 
 
+# Services whose API has no sampling parameters at all, so temperature and top_p are
+# accepted and ignored rather than honoured. Anthropic withdrew temperature, top_p and
+# top_k from the Messages API; the client stopped sending them, which is correct but
+# invisible -- a slider that still looks live is a lie about what the request contains.
+# This is a UI-presentation list, which is why it lives here and not in the library.
+SAMPLING_BLIND_SERVICES = frozenset({"anthropic"})
+
+
+def honors_sampling(model: ModelInfo) -> bool:
+    """Whether temperature and top_p reach the provider for this model.
+
+    Two ways to lose them: the service has no such parameters (above), or the catalog
+    flags this particular model as rejecting them. Note the explicit `is not False` --
+    supports_sampling is None for most entries, which means "no reason to think not".
+    """
+    try:
+        service = resolve_service(model.service)
+    except ValueError:
+        return model.supports_sampling is not False
+    if service in SAMPLING_BLIND_SERVICES:
+        return False
+    return model.supports_sampling is not False
+
+
 @app.get("/api/models")
 async def get_models():
-    """The models the UI can offer, straight from the catalog."""
-    return {"models": [asdict(model) for model in load_models()]}
+    """The models the UI can offer, straight from the catalog.
+
+    Each entry carries a computed `honors_sampling` so the sidebar can disable the
+    sliders that would have no effect. Computed here because it depends on the provider
+    registry, which the browser has no view of.
+    """
+    return {
+        "models": [
+            {**asdict(model), "honors_sampling": honors_sampling(model)}
+            for model in load_models()
+        ]
+    }
 
 
 @app.get("/api/config")
 async def get_config():
     """Which credentials the server already has. Booleans only -- a key is never sent to
-    the browser."""
+    the browser.
+
+    Derived from the registry rather than a hand-written list, so a provider added to the
+    library shows up here without an edit. This reports what is SET, which is not the same
+    question as available_services() answers for the library: a service with no credential
+    still appears in the dropdown, because hiding a model because a key is missing is how
+    you get "why is my model gone?"."""
     def has_key(service: str) -> bool:
         return any(os.getenv(name, "").strip() for name in provider_spec(service).key_env)
 
@@ -528,15 +575,13 @@ async def get_config():
          if (value := os.getenv(name, "").strip())),
         "",
     )
-    return {
-        "env_status": {
-            "anthropic": has_key("anthropic"),
-            "openrouter": has_key("openrouter"),
-            "huggingface": has_key("huggingface"),
-            "ollama": has_key("ollama"),
-            "ollama_url": local_url,
-        }
+    env_status: dict[str, bool | str] = {
+        service: has_key(service) for service in known_services()
     }
+    # The local Ollama box takes an endpoint, not a credential, so it is reported as the
+    # URL itself -- the sidebar prefills its field from this.
+    env_status["ollama_url"] = local_url
+    return {"env_status": env_status}
 
 
 @app.get("/", response_class=HTMLResponse)

@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from corbelity.workbench import app as workbench
 
 TEXT_MODEL = "google/gemini-2.5-flash"      # routes to openrouter
-IMAGE_MODEL = "stabilityai/stable-diffusion-3.5-large"
-SOUND_MODEL = "hexgrad/Kokoro-82M"
+IMAGE_MODEL = "black-forest-labs/FLUX.1-dev"
+SOUND_MODEL = "gpt-4o-mini-tts"
 
 HISTORY = [
     {"role": "user", "content": "What is a k-d tree?"},

@@ -68,7 +68,7 @@
                 </div>
 
                 <!-- Sliders -->
-                <div class="control-group">
+                <div class="control-group" id="tempGroup">
                     <div class="label-with-value">
                         <label for="tempSlider">Temperature</label>
                         <span id="tempValue" class="slider-val">0.70</span>
@@ -80,7 +80,7 @@
                         chances.</p>
                 </div>
 
-                <div class="control-group">
+                <div class="control-group" id="topPGroup">
                     <div class="label-with-value">
                         <label for="topPSlider">Top P</label>
                         <span id="topPValue" class="slider-val">0.90</span>
@@ -118,6 +118,16 @@
                             <input type="password" id="anthropicKey" class="input-control" autocomplete="off"
                                 placeholder="Anthropic API key (override)">
                             <span id="anthropicBadge" class="env-badge" title="Lit when the server has this key in its environment">.env</span>
+                        </div>
+                        <div class="key-row">
+                            <input type="password" id="openaiKey" class="input-control" autocomplete="off"
+                                placeholder="OpenAI API key (override)">
+                            <span id="openaiBadge" class="env-badge" title="Lit when the server has this key in its environment">.env</span>
+                        </div>
+                        <div class="key-row">
+                            <input type="password" id="geminiKey" class="input-control" autocomplete="off"
+                                placeholder="Gemini API key (override)">
+                            <span id="geminiBadge" class="env-badge" title="Lit when the server has GEMINI_API_KEY or GOOGLE_API_KEY set">.env</span>
                         </div>
                         <div class="key-row">
                             <input type="password" id="huggingfaceKey" class="input-control" autocomplete="off"

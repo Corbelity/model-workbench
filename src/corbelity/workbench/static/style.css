@@ -296,6 +296,20 @@ input[type="range"] {
     color: var(--text-muted);
 }
 
+/* A control the selected model ignores. Dimmed and disabled rather than hidden: the
+   setting still exists and comes back with the next model, and a control that vanishes is
+   harder to reason about than one that is visibly inert. The hint text says why. */
+.control-group.not-applicable label,
+.control-group.not-applicable .slider-val,
+.control-group.not-applicable .field-hint {
+    opacity: 0.5;
+}
+
+.control-group.not-applicable input[type="range"] {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* Explanatory text under a control. Used for the slider hints and the API-key note --
    always visible rather than hidden behind a hover, so it needs no discovery and works
    the same on touch. */
