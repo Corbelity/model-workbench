@@ -178,6 +178,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     opt.dataset.service = m.service;
                     opt.dataset.modality = m.modality;
                     opt.dataset.acceptsImages = m.accepts_images ? 'true' : 'false';
+                    // Absent on an older server, which should read as "assume they work"
+                    // rather than greying every slider out.
+                    opt.dataset.honorsSampling = m.honors_sampling === false ? 'false' : 'true';
                     optgroup.appendChild(opt);
                 });
 
@@ -192,6 +195,28 @@ document.addEventListener('DOMContentLoaded', () => {
             setSelectMessage('Could not load models. Is the server running?');
             updateSelectedService();
         }
+    }
+
+    // Sampling controls, and the hint each one shows when it still does something. The
+    // defaults are read from the DOM so the wording lives in index.html only.
+    const SAMPLING_NA_HINT =
+        'Not used by this model: the provider ignores sampling settings, so this slider '
+        + 'has no effect on the request.';
+    const samplingControls = [
+        { group: document.getElementById('tempGroup'), input: tempSlider, hint: document.getElementById('tempHint') },
+        { group: document.getElementById('topPGroup'), input: topPSlider, hint: document.getElementById('topPHint') },
+    ].filter(control => control.group && control.input && control.hint);
+    samplingControls.forEach(control => { control.defaultHint = control.hint.textContent; });
+
+    function updateSamplingEnablement() {
+        const option = modelSelect.options[modelSelect.selectedIndex];
+        // Default to enabled: an unknown or unselected model should not look broken.
+        const honors = option?.dataset.honorsSampling !== 'false';
+        samplingControls.forEach(control => {
+            control.group.classList.toggle('not-applicable', !honors);
+            control.input.disabled = !honors;
+            control.hint.textContent = honors ? control.defaultHint : SAMPLING_NA_HINT;
+        });
     }
 
     function selectedAcceptsImages() {
@@ -238,6 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
             serviceBadge.textContent = 'Service: --';
         }
         updateAttachEnablement();
+        updateSamplingEnablement();
     }
 
     modelSelect.addEventListener('change', updateSelectedService);
@@ -248,7 +274,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // -------------------------------------------------------------
     // Fields the UI can override, in the order they appear. `ollamaUrl` is an endpoint,
     // not a key, and its element id has no "Key" suffix.
-    const keyNames = ['openrouter', 'anthropic', 'huggingface', 'ollamaUrl'];
+    const keyNames = ['openrouter', 'anthropic', 'openai', 'gemini', 'huggingface', 'ollamaUrl'];
+
+    // Services with a key field and a .env badge. Derived from keyNames so a new provider
+    // is added in one place; ollamaUrl is excluded because it is an endpoint.
+    const keyServices = keyNames.filter(name => name !== 'ollamaUrl');
 
     fetch('/api/config')
         .then(res => res.json())
@@ -256,7 +286,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const status = data.env_status;
             if (!status) return;
 
-            ['openrouter', 'anthropic', 'huggingface'].forEach(name => {
+            keyServices.forEach(name => {
                 const badge = document.getElementById(`${name}Badge`);
                 if (badge && status[name]) badge.classList.add('active');
             });
@@ -665,6 +695,8 @@ document.addEventListener('DOMContentLoaded', () => {
             max_tokens: parseInt(maxTokensInput.value, 10),
             openrouter_key: document.getElementById('openrouterKey')?.value || null,
             anthropic_key: document.getElementById('anthropicKey')?.value || null,
+            openai_key: document.getElementById('openaiKey')?.value || null,
+            gemini_key: document.getElementById('geminiKey')?.value || null,
             huggingface_key: document.getElementById('huggingfaceKey')?.value || null,
             ollama_url: document.getElementById('ollamaUrl')?.value || null,
         };
@@ -688,7 +720,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // Appended only on success, so a failed call never enters the transcript.
             // The server decides what the assistant turn says -- for media that is a
             // placeholder, not the payload.
-            if (appendContextToggle.checked && data.context_entry) {
+            if (!appendContextToggle.checked) {
+                console.info('Not appending to the conversation: "Append responses" is off.');
+            } else if (!data.context_entry) {
+                // The server sends context_entry on every 200, so its absence means the
+                // response is not the shape this page expects -- most often a stale
+                // cached app.js, or a server older than this file.
+                console.warn('Response had no context_entry, so nothing was appended.',
+                             'Keys present:', Object.keys(data).join(', '));
+            } else {
                 // The server formats the user turn so the attachment placeholder has one
                 // definition; fall back for safety if an older server omits the field.
                 conversation.push(data.user_context_entry
@@ -698,6 +738,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderContext();
             }
         } catch (err) {
+            // Includes anything renderResults() threw, which runs BEFORE the append above,
+            // so a rendering failure also costs you the conversation turn. Logged with the
+            // stack because "Network error" on screen is misleading when the network was
+            // fine.
+            console.error('runExecution failed after the response arrived:', err);
             showError(`Network error: ${err.message}`);
         } finally {
             executeBtn.disabled = false;

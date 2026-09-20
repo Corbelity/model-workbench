@@ -81,7 +81,7 @@ wheels = [
 [[package]]
 name = "corbelity-model-client"
 version = "0.1.0"
-source = { git = "https://github.com/Corbelity/model-client#40558d2cca509ef70b7c06ff2ad370db32ee4e43" }
+source = { git = "https://github.com/Corbelity/model-client#9c0ce97cf7ae573b47395cc568e016ef32177295" }
 
 [package.optional-dependencies]
 all = [

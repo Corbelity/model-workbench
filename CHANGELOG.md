@@ -22,10 +22,23 @@ Everything below becomes `0.1.0` when the first tag is cut.
 
 ### Added
 
+- OpenAI and Gemini support, following the providers added to
+  [`corbelity-model-client`](https://github.com/Corbelity/model-client). OpenAI generates
+  text, images and speech natively; Gemini is text only, running through Google's
+  OpenAI-compatibility endpoint. Both get a sidebar credential field and a `.env` badge,
+  and Gemini accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+- `CORBELITY_SERVICES` narrows the model dropdown to named services. Presentation only:
+  it does not disable a service, and a filtered-out model still runs if something asks
+  for it.
+- The temperature and top-p sliders are dimmed and disabled for models whose provider
+  would not receive them, with the hint text replaced by the reason. `/api/models`
+  publishes a computed `honors_sampling` per model, because the decision depends on the
+  provider registry and the browser has no view of it.
 - A browser workbench for running one prompt across text, image and speech models and
   comparing the output, latency, token usage and estimated cost — built on
   [`corbelity-model-client`](https://github.com/Corbelity/model-client), so Anthropic,
-  OpenRouter, local Ollama, Ollama Cloud and HuggingFace are driven from one screen.
+  OpenAI, Gemini, OpenRouter, local Ollama, Ollama Cloud and HuggingFace are driven from
+  one screen.
 - `POST /api/generate`, which routes on the selected model's catalog entry, returning the
   result, real provider-reported token usage, latency, an estimated cost and a
   `context_payload` describing exactly what was sent.
@@ -40,7 +53,8 @@ Everything below becomes `0.1.0` when the first tag is cut.
 - `GET /api/models` and `GET /api/config`. The model list is the client library's catalog,
   merged with any file named by `CORBELITY_MODEL_CATALOG` and re-read per request, so a
   catalog edit needs a page refresh rather than a restart. `/api/config` reports only
-  whether each credential is set, never its value.
+  whether each credential is set, never its value, and derives its list from the provider
+  registry so a provider added to the library appears without an edit here.
 - `GET /api/traces` and `GET /api/traces/{run_id}` for reviewing recorded calls, grouped
   into runs with token totals, error and artifact counts. Reading works whether or not
   this server is recording, and a trace file whose last line was truncated by a killed
@@ -57,6 +71,16 @@ Everything below becomes `0.1.0` when the first tag is cut.
   access and no credentials.
 - CI on Python 3.12, 3.13 and 3.14: lint, tests, and a wheel build that verifies the UI
   files are actually inside the wheel.
+
+### Provider behaviour worth knowing
+
+- **Temperature and top-p are accepted and ignored for Anthropic models.** The Messages
+  API withdrew `temperature`, `top_p` and `top_k`; they are absent from
+  `MessageCreateParams` as of `anthropic` 1.7, so passing one raised a `TypeError` from
+  the SDK before anything reached the service. `corbelity-model-client` no longer sends
+  them and now requires `anthropic>=1.7`. Failing every Anthropic call because a slider
+  holds a value would have been worse, so the values are dropped rather than rejected --
+  the dimmed sliders are how that stays visible instead of silent.
 
 ### Security
 

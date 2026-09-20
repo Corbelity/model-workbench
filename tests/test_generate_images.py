@@ -108,7 +108,7 @@ def test_a_model_not_catalogued_for_images_is_refused(client):
 
 
 def test_images_are_refused_for_a_media_modality(client):
-    response = post(client, model="stabilityai/stable-diffusion-3.5-large",
+    response = post(client, model="black-forest-labs/FLUX.1-dev",
                     modality="image", prompt="a cabin",
                     images=[{"data_url": PNG_DATA_URL}])
     assert response.status_code == 400
