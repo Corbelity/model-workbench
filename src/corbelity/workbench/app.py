@@ -32,6 +32,8 @@ from corbelity.model_client import (
     MediaResult,
     ModelCatalog,
     ModelInfo,
+    TooManyImagesError,
+    UnsupportedImageInputError,
     UnsupportedModalityError,
     catalog_for,
     get_default_config,
@@ -480,16 +482,26 @@ def normalize_attachments(attachments: list[ImageAttachment],
     return resolved
 
 
-def media_placeholder(modality: str, prompt: str) -> str:
+def media_placeholder(modality: str, prompt: str,
+                      images: list[ImageInput] | None = None) -> str:
     """What a media generation leaves in the conversation. The payload itself can't go
     there -- a data URL can't be replayed to a text model and would swamp localStorage
     (one generated PNG measured 1.68 MB) -- so the transcript records that it happened.
-    Formatted here rather than in JS so there is one definition of it."""
+    Formatted here rather than in JS so there is one definition of it.
+
+    Reference images are named for the same reason the prompt is: without them the turn
+    claims the image came from the prompt alone, which is the wrong thing to read back
+    when you are working out why two generations differ."""
     trimmed = prompt.strip()
     if len(trimmed) > MEDIA_PLACEHOLDER_PROMPT_CHARS:
         trimmed = trimmed[:MEDIA_PLACEHOLDER_PROMPT_CHARS] + "…"
     kind = "image" if modality == IMAGE else "audio"
-    return f'[{kind} generated: "{trimmed}"]'
+    entry = f'[{kind} generated: "{trimmed}"]'
+    if images:
+        named = [image.name for image in images if image.name]
+        detail = ", ".join(named) if named else f"{len(images)} image(s)"
+        entry += f"\n[reference: {detail}]"
+    return entry
 
 
 def attachment_placeholder(prompt: str, images: list[ImageInput]) -> str:
@@ -752,12 +764,16 @@ def generate(req: GenerateRequest):
     # Both checks run before a client is built, for the same reason the modality check
     # does: an impossible combination should read as a routing problem, and you should not
     # pay for a call to discover it.
+    # Images are input in two different senses, and the catalog's accepts_images covers
+    # both: a text model READS them, and an image model takes REFERENCE images to
+    # condition what it generates -- a character sheet, a set, a prop, so a face or a
+    # place survives between generations. Speech takes neither.
     if req.images:
-        if modality != TEXT:
+        if modality == SOUND:
             raise HTTPException(
                 status_code=400,
-                detail=(f"Image input applies to text generation only; modality"
-                        f" {modality!r} produces media from a prompt."),
+                detail=("Speech generation takes no image input;"
+                        f" {req.model!r} produces audio from text alone."),
             )
         if not model_info.accepts_images:
             raise HTTPException(
@@ -816,14 +832,22 @@ def generate(req: GenerateRequest):
             content = client.complete(req.system_prompt or "", req.prompt,
                                       history=history, images=pictures)
             context_entry = {"role": "assistant", "content": content}
+        elif modality == IMAGE:
+            # Image generation is single-shot -- history has no meaning for it -- but it
+            # does take reference images, which is why this is no longer folded in with
+            # speech below.
+            content = data_url(client.generate_image(req.prompt, images=pictures))
+            context_entry = {"role": "assistant",
+                             "content": media_placeholder(modality, req.prompt, pictures)}
         else:
-            # Image and audio generation is single-shot -- history has no meaning for it.
-            produce = client.generate_image if modality == IMAGE else client.generate_speech
-            content = data_url(produce(req.prompt))
+            content = data_url(client.generate_speech(req.prompt))
             context_entry = {"role": "assistant",
                              "content": media_placeholder(modality, req.prompt)}
 
-    except UnsupportedModalityError as err:
+    except (UnsupportedModalityError, UnsupportedImageInputError, TooManyImagesError) as err:
+        # Capability mismatches, all of them the caller's to fix: the service cannot
+        # produce this modality, cannot take reference images at all, or was given more
+        # than its published limit.
         raise HTTPException(status_code=400, detail=str(err)) from err
     except ValueError as err:
         # Missing credential, missing endpoint, unknown service -- all ValueErrors, and all

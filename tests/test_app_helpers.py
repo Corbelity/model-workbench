@@ -224,12 +224,21 @@ def test_models_without_vision_are_not_flagged():
     assert catalog.get("llama3:latest").accepts_images is False
 
 
-def test_only_text_models_are_flagged_for_image_input():
-    """Image input is a text-generation feature; flagging a text-to-image model would
-    describe a request /api/generate refuses."""
+def test_only_text_and_image_models_are_flagged_for_image_input():
+    """accepts_images covers two different things: a text model READS an image, and an
+    image model takes REFERENCE images to condition what it generates. Speech takes
+    neither, so a sound entry carrying the flag describes a request /api/generate
+    refuses."""
     for model in workbench.load_models():
         if model.accepts_images:
-            assert model.modality == "text", model.id
+            assert model.modality in ("text", "image"), model.id
+
+
+def test_the_reference_image_path_is_reachable():
+    """At least one image-generation model must accept reference images, or that code
+    cannot be exercised from the UI at all."""
+    catalog = workbench.load_models()
+    assert any(m.modality == "image" and m.accepts_images for m in catalog)
 
 
 def test_the_cloud_and_local_vision_paths_are_both_reachable():

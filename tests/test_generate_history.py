@@ -29,12 +29,14 @@ class FakeClient:
 
     def __init__(self):
         self.seen = None
+        self.seen_reference_images = None
 
     def complete(self, system, user, history=None, images=None):
         self.seen = {"system": system, "user": user, "history": history}
         return "canned answer"
 
-    def generate_image(self, prompt):
+    def generate_image(self, prompt, images=None):
+        self.seen_reference_images = images
         return MediaResult(data=b"\x89PNG\r\n", mime_type="image/png")
 
     def generate_speech(self, text):

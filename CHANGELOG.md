@@ -27,6 +27,13 @@ Everything below becomes `0.1.0` when the first tag is cut.
   text, images and speech natively; Gemini is text only, running through Google's
   OpenAI-compatibility endpoint. Both get a sidebar credential field and a `.env` badge,
   and Gemini accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+- Reference images for image generation (SA-349). An image-generation model catalogued
+  with `accepts_images` now accepts attached images as conditioning input — a character
+  sheet, a set, a prop — so a face or a place survives between generations. `/api/generate`
+  previously refused image input on any non-text modality, which blocked this outright.
+  Speech still takes none. `UnsupportedImageInputError` and `TooManyImagesError` from the
+  provider map to 400 rather than 500, and the transcript records which references a
+  generation used instead of implying the prompt alone produced it.
 - `CORBELITY_SERVICES` narrows the model dropdown to named services. Presentation only:
   it does not disable a service, and a filtered-out model still runs if something asks
   for it.

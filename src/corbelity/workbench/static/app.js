@@ -225,8 +225,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function attachmentBlockReason() {
-        if (activeModality !== 'text') {
-            return 'Image input applies to text generation only.';
+        // Reference images condition an image generation, so the gate is the model's
+        // accepts_images flag rather than the modality. Only speech takes neither.
+        if (activeModality === 'sound') {
+            return 'Speech generation takes no image input.';
         }
         if (!selectedAcceptsImages()) {
             return `${modelSelect.value || 'This model'} is not registered as accepting image input.`;
@@ -245,6 +247,14 @@ document.addEventListener('DOMContentLoaded', () => {
         // Existing attachments are greyed, not discarded - see style.css.
         attachList.querySelectorAll('.attach-item')
             .forEach(node => node.classList.toggle('blocked', blocked));
+
+        // Say why they are inert. Without this the thumbnails just look broken, and the
+        // summary keeps reporting a size for images that are not being sent.
+        if (blocked && attachments.length) {
+            const count = `${attachments.length} image${attachments.length === 1 ? '' : 's'}`;
+            attachSummary.textContent = `${count} not sent to this model`;
+            attachSummary.className = 'attach-summary warn';
+        }
     }
 
     function updateSelectedService() {
@@ -682,13 +692,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // Only text calls are conversational; image/audio generation is single-shot,
             // and sending history there would make an unrelated edit block the call.
             history: activeModality === 'text' ? conversation : [],
-            // Same guard as history: media generation is single-shot and the server
-            // refuses attachments on it.
-            images: activeModality === 'text'
-                ? attachments.map(a => (a.data_url
+            // Reference images ride along with an image generation too; only speech
+            // takes none. The server refuses them for sound, so don't send them.
+            images: activeModality === 'sound'
+                ? []
+                : attachments.map(a => (a.data_url
                     ? { data_url: a.data_url, name: a.name }
-                    : { url: a.url, name: a.name }))
-                : [],
+                    : { url: a.url, name: a.name })),
             modality: activeModality,
             temperature: parseFloat(tempSlider.value),
             top_p: parseFloat(topPSlider.value),

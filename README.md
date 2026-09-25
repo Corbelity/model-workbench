@@ -19,7 +19,10 @@ HuggingFace, and every call is logged and traced identically whichever provider 
   (a catalog entry's `supports_sampling` flag decides; see below).
 - **Edit the conversation.** Every prior turn is a card you can edit, delete, or copy out as
   JSON.
-- **Attach images** to a text prompt (file or URL) for vision-capable models.
+- **Attach images** to a prompt (file or URL) for vision-capable models, and as *reference*
+  images for image generation — a character sheet, a set, a prop — so a face or a place
+  survives between generations. The catalog's `accepts_images` gates both; speech takes
+  neither.
 - **See what a call cost:** latency, prompt/completion tokens as the provider reported them,
   and an estimated cost from the catalog's per-1k rates.
 - **Inspect the request** in the payload drawer, including where each credential came from.
@@ -102,9 +105,11 @@ CORBELITY_MODEL_CATALOG=./my-models.json
 
 `service` is one of `anthropic`, `openai`, `gemini`, `openrouter`, `ollama-local`, `ollama`
 or `huggingface`. `modality` is `text`, `image` or `sound`. `accepts_images` gates the
-attach controls for that model. `supports_sampling: false` tells the Anthropic client to
-omit `temperature` and `top_p` for a model that rejects them. A model with no
-`cost_per_1k_*` reports $0 rather than an invented number.
+attach controls for that model — on a text model it means the model can read an image, and
+on an image model that it accepts reference images to condition what it generates.
+`supports_sampling: false` tells the client to omit `temperature` and `top_p` for a model
+that rejects them. A model with no `cost_per_1k_*` reports $0 rather than an invented
+number.
 
 To show only some providers, name them in `CORBELITY_SERVICES`:
 
