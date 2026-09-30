@@ -28,6 +28,8 @@ HuggingFace, and every call is logged and traced identically whichever provider 
 - **Inspect the request** in the payload drawer, including where each credential came from.
 - **Review recorded traces** through `/api/traces` (see [Tracing](#tracing)).
 
+See DESIGN document for details
+
 ## Quickstart
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).

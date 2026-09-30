@@ -218,5 +218,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Traces hold full prompt and response text
-logs/
-my-models.json
+**/logs/
+*traces*.json
+
+# local model list
+my-models*.json
