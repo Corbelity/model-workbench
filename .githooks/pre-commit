@@ -1,0 +1,32 @@
+#!/bin/sh
+# Fast local check that staged content carries no term that must stay private.
+#
+# Enable it once per clone:
+#
+#     git config core.hooksPath .githooks
+#
+# Git will not run a hook out of a tracked directory until you opt in like that, which is
+# why this is a setup step rather than something a clone silently does to you.
+#
+# It does nothing unless this clone has a term list:
+#
+#     git config --local guard.pattern "internalname|some person|XY-[0-9]+"
+#
+# The list lives in .git/config and is never committed. This hook carries no terms itself,
+# which is what makes it safe to track.
+#
+# A convenience, not the control: it catches a mistake a second after you make it, while the
+# Content guard workflow is what cannot be bypassed. `git commit --no-verify` skips this and
+# CI will disagree with you.
+#
+# /bin/sh, not bash: on Windows this runs under the shell Git ships, and the interpreter
+# fallback below is what keeps it working whether `python` or `python3` is the name on PATH.
+root=$(git rev-parse --show-toplevel) || exit 0
+for py in python3 python py; do
+  if command -v "$py" >/dev/null 2>&1; then
+    exec "$py" "$root/scripts/guard.py" --staged
+  fi
+done
+echo "guard: no python interpreter found on PATH; skipping the pre-commit scan." >&2
+echo "guard: the Content guard workflow will still check this when you push." >&2
+exit 0
