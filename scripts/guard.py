@@ -269,7 +269,7 @@ def main(argv: list[str]) -> int:
 
     if mode == "--ci":
         return run_ci(rx)
-    if mode == "--staged":
+    elif mode == "--staged":
         status = run_staged(rx)
     else:
         status = run_worktree(rx)
