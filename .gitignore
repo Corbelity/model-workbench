@@ -219,7 +219,7 @@ __marimo__/
 
 # Traces hold full prompt and response text
 **/logs/
-*traces*.json
+*traces*.json*
 
 # local model list
 my-models*.json

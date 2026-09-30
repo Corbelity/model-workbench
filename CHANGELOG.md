@@ -91,6 +91,14 @@ Everything below becomes `0.1.0` when the first tag is cut.
 
 ### Security
 
+- A repository check that fails the build when repo-bound text carries a term the
+  maintainers keep private. It scans tracked file contents, tracked paths, every commit
+  message in the pushed or proposed range, and the pull request title, body and branch name.
+  The term list is a repository secret rather than a file, since a public workflow naming
+  what it protects publishes it; in CI nothing matched is printed, because the log is public
+  too. `scripts/guard.py` runs the same scan locally and does print what it found, and
+  `.githooks/pre-commit` runs it against staged content. Fork pull requests get no secrets,
+  so the check skips there.
 - Server-side image fetches are restricted by destination, not only by scheme. The
   hostname is resolved and the request refused if any resolved address is loopback,
   private, link-local (including the `169.254.169.254` metadata endpoint), multicast,
