@@ -22,6 +22,12 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `edited` is not in the default set (opened, synchronize, reopened), and without it the
+    # title and body are scanned once at open and never again -- so a clean pull request
+    # could be edited afterwards to carry a term, passing a guard that already went green.
+    # That is the exact route the leak took last time, which is why the body is checked at
+    # all; leaving it on the default types would scan everything except the way it happened.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 permissions:
