@@ -49,11 +49,12 @@ dev = [
     "ruff>=0.6",
 ]
 
-# LOCAL DEVELOPMENT ONLY -- do not commit this form.
-# model-client is resolved from the sibling checkout so edits there are picked up with no
-# commit, push or relock in between. Before opening a PR, restore the git source below and
-# rerun `uv lock`, or a fresh clone and CI both fail at `uv sync`:
-#   corbelity-model-client = { git = "https://github.com/Corbelity/model-client" }
+# This is the committable form: until model-client is on PyPI, uv resolves it from GitHub.
+# The version floor in [project.dependencies] is checked against whatever this ref
+# provides, so bumping the floor also means relocking (`uv lock`) against a ref that has
+# it. Developing both repos side by side? Swap in the sibling checkout, and swap it back
+# before opening a PR -- a local path breaks a fresh clone and fails CI at `uv sync`:
+#   corbelity-model-client = { path = "../model-client", editable = true }
 [tool.uv.sources]
 corbelity-model-client = { git = "https://github.com/Corbelity/model-client" }
 
