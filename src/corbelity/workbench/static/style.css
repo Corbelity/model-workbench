@@ -912,9 +912,18 @@ a.btn-secondary {
     overflow: hidden;
 }
 
-/* Greyed rather than removed: silently deleting a user's file because they switched
-   model is hostile. The send is blocked, which is enough. */
-.attach-item.blocked { opacity: 0.45; }
+/* Greyed rather than removed: silently deleting a picked file because the model changed
+   is hostile, and switching back should not mean picking it again. Desaturated as well as
+   dimmed so it reads as deliberately inactive rather than as a failed thumbnail; the
+   summary beside it says why. */
+.attach-item.blocked {
+    opacity: 0.4;
+    filter: grayscale(1);
+}
+
+.attach-item.blocked .attach-name {
+    text-decoration: line-through;
+}
 
 .attach-item img {
     width: 100%;

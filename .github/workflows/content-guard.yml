@@ -1,0 +1,81 @@
+name: Content guard
+
+# Fails the build when repo-bound text carries a term that must not become public.
+#
+# The term list is deliberately NOT in this file. A public workflow that names what it is
+# protecting publishes exactly the thing it exists to keep out of the repo, in a file that
+# search engines index. It comes from the FORBIDDEN_PATTERN repository secret: one regex
+# alternation, matched case-insensitively, e.g.
+#
+#     internalname|some person|XY-[0-9]+
+#
+# The scan itself lives in scripts/guard.py so that what CI enforces and what a developer
+# can run locally are the same code and the same regex engine. Two implementations would
+# have drifted, and the moment they disagree the local one stops being trusted.
+#
+# NOTHING MATCHED IS EVER PRINTED in --ci mode: a hit reports a path and line number, or a
+# commit sha, and withholds the path too when the filename is what matched. Actions logs on
+# a public repo are public. GitHub's own log masking does not help and must not be relied
+# on -- it masks the literal secret value, and what a regex MATCHES is a different string.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # `edited` is not in the default set (opened, synchronize, reopened), and without it the
+    # title and body are scanned once at open and never again -- so a clean pull request
+    # could be edited afterwards to carry a term, passing a guard that already went green.
+    # That is the exact route the leak took last time, which is why the body is checked at
+    # all; leaving it on the default types would scan everything except the way it happened.
+    types: [opened, synchronize, reopened, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      # Decided before the checkout so a run that cannot work says so, instead of passing
+      # quietly and leaving a green tick that means nothing.
+      - name: Is the term list available?
+        id: gate
+        env:
+          # A pull request from a fork receives no secrets, so the guard cannot run there.
+          # That hole is acceptable and worth stating plainly: the risk being managed is
+          # leaking our own internal names, and an outside contributor does not know them.
+          # Pushes and same-repo pull requests -- every route by which we could leak one --
+          # always have the secret.
+          IS_FORK: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          set -uo pipefail
+          if [ "$IS_FORK" = "true" ]; then
+            echo "::notice::Fork pull request: secrets are unavailable, so this guard is skipped."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.run == 'true'
+        with:
+          # Full history: commit messages in the pushed or proposed range are checked, and a
+          # message is where the leak happened last time -- not in the code.
+          fetch-depth: 0
+
+      # No setup-python step: ubuntu-latest ships python3, the script imports only the
+      # standard library, and a dependency install is a supply chain this job does not need.
+      - name: Scan content, paths, commit messages and pull request text
+        if: steps.gate.outputs.run == 'true'
+        env:
+          FORBIDDEN_PATTERN: ${{ secrets.FORBIDDEN_PATTERN }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          # Passed through env and never interpolated into a script: a title containing shell
+          # metacharacters would otherwise execute here.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+        run: python3 scripts/guard.py --ci

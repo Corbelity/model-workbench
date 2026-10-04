@@ -1,0 +1,6 @@
+# Git hooks must be LF in the working tree on every platform. A hook checked out with CRLF
+# fails as "bad interpreter: /bin/sh^M", which reads as a broken script rather than as a
+# line-ending problem and costs an hour to recognise. core.autocrlf is not set anywhere in
+# this clone, so this file is the only thing pinning it.
+.githooks/** text eol=lf
+*.sh text eol=lf

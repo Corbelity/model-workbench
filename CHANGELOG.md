@@ -27,6 +27,13 @@ Everything below becomes `0.1.0` when the first tag is cut.
   text, images and speech natively; Gemini is text only, running through Google's
   OpenAI-compatibility endpoint. Both get a sidebar credential field and a `.env` badge,
   and Gemini accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+- Reference images for image generation (SA-349). An image-generation model catalogued
+  with `accepts_images` now accepts attached images as conditioning input — a character
+  sheet, a set, a prop — so a face or a place survives between generations. `/api/generate`
+  previously refused image input on any non-text modality, which blocked this outright.
+  Speech still takes none. `UnsupportedImageInputError` and `TooManyImagesError` from the
+  provider map to 400 rather than 500, and the transcript records which references a
+  generation used instead of implying the prompt alone produced it.
 - `CORBELITY_SERVICES` narrows the model dropdown to named services. Presentation only:
   it does not disable a service, and a filtered-out model still runs if something asks
   for it.
@@ -84,6 +91,14 @@ Everything below becomes `0.1.0` when the first tag is cut.
 
 ### Security
 
+- A repository check that fails the build when repo-bound text carries a term the
+  maintainers keep private. It scans tracked file contents, tracked paths, every commit
+  message in the pushed or proposed range, and the pull request title, body and branch name.
+  The term list is a repository secret rather than a file, since a public workflow naming
+  what it protects publishes it; in CI nothing matched is printed, because the log is public
+  too. `scripts/guard.py` runs the same scan locally and does print what it found, and
+  `.githooks/pre-commit` runs it against staged content. Fork pull requests get no secrets,
+  so the check skips there.
 - Server-side image fetches are restricted by destination, not only by scheme. The
   hostname is resolved and the request refused if any resolved address is loopback,
   private, link-local (including the `169.254.169.254` metadata endpoint), multicast,
