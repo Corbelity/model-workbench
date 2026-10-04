@@ -22,6 +22,23 @@ Everything below becomes `0.1.0` when the first tag is cut.
 
 ### Added
 
+- Video generation (SA-381). Video is submit-then-poll rather than request-response, so it
+  has its own endpoints: `POST /api/video/submit` starts a generation and returns a job in
+  about one round trip, `POST /api/video/jobs/{id}/poll` asks the provider where it is,
+  `GET /api/video/jobs` lists what this server knows about, and
+  `GET /api/video/jobs/{id}/file` serves the finished clip. `POST /api/video/check` answers
+  whether a combination of inputs and settings would be accepted *before* anything is sent,
+  using the library's own `resolve_video_request()` — the same function a real submission
+  runs — and returns `200` with `ok: false` for a refusal, because a refusal is the
+  expected answer to that question rather than a failed request.
+
+  Jobs are stored in SQLite with the clips as files beside them, under `media/video` or
+  wherever `WORKBENCH_VIDEO_DIR` points. That is what makes an interrupted generation
+  recoverable: restart the server mid-generation, reopen the page, and the job is found and
+  finished. A credential is never stored, so a job polled after a restart needs its key
+  sent again or set in the environment. See DESIGN.md §12.
+- `WORKBENCH_VIDEO_DIR` names where video jobs and their clips are kept. Defaults to
+  `media/video`, relative to the launch directory.
 - OpenAI and Gemini support, following the providers added to
   [`corbelity-model-client`](https://github.com/Corbelity/model-client). OpenAI generates
   text, images and speech natively; Gemini is text only, running through Google's

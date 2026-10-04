@@ -15,7 +15,7 @@ import os
 import re
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from ipaddress import IPv4Address, IPv6Address, ip_address
 from pathlib import Path
@@ -28,6 +28,8 @@ from corbelity.model_client import (
     SOUND,
     SUPPORTED_IMAGE_MIMES,
     TEXT,
+    VIDEO,
+    VIDEO_ROLES,
     ImageInput,
     MediaResult,
     ModelCatalog,
@@ -35,6 +37,11 @@ from corbelity.model_client import (
     TooManyImagesError,
     UnsupportedImageInputError,
     UnsupportedModalityError,
+    UnsupportedVideoInputError,
+    VideoInputs,
+    VideoJobNotFoundError,
+    VideoOptions,
+    VideoStatus,
     catalog_for,
     get_default_config,
     known_services,
@@ -42,6 +49,7 @@ from corbelity.model_client import (
     make_trace_logger,
     provider_spec,
     resolve_service,
+    resolve_video_request,
     sniff_image_mime,
     supported_modalities,
     trace_file_path,
@@ -53,6 +61,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from . import videostore
 
 # The model client deliberately reads no .env file and configures no logging: both are
 # application decisions, and this is the application. usecwd=True searches from where the
@@ -141,12 +151,16 @@ UI_URL_FIELDS: dict[str, str] = {"ollama-local": "ollama_url"}
 # The UI's sound pill posts "sound"; accept the obvious synonyms too.
 MODALITY_ALIASES = {"audio": SOUND, "speech": SOUND, "img": IMAGE}
 
-# What this UI can actually drive: one pill each, and a dispatch branch in generate().
-# model-client 0.4.0 added video, which has neither -- the sidebar has no video pill, so
-# selecting a Veo model leaves whatever pill was already active and the request arrives
-# claiming to be text. Checked against the MODEL's catalogued modality rather than the
-# requested one, because that mismatch is exactly what has to be caught.
-UI_MODALITIES = frozenset({TEXT, IMAGE, SOUND})
+# What /api/generate dispatches: one sidebar pill each, and a branch in generate().
+#
+# Video is deliberately NOT here, and its absence is not a gap. A video generation runs
+# for minutes and is submit-then-poll, so it cannot be a request that returns the result
+# -- it has its own endpoints further down (/api/video/*) and its own panel. The guard
+# below exists because selecting a Veo model leaves whatever pill was already active, so
+# the request arrives at generate() claiming to be text; it is checked against the MODEL's
+# catalogued modality rather than the requested one, because that mismatch is the thing to
+# catch.
+GENERATE_MODALITIES = frozenset({TEXT, IMAGE, SOUND})
 
 # How long a media prompt may be inside a context placeholder before it is trimmed.
 MEDIA_PLACEHOLDER_PROMPT_CHARS = 200
@@ -205,7 +219,24 @@ class ImageAttachment(BaseModel):
     name: str | None = None
 
 
-class GenerateRequest(BaseModel):
+class Credentials(BaseModel):
+    """The per-session key and endpoint fields the sidebar may send with any request.
+
+    Defined once and inherited, rather than repeated per request model, because these
+    field names and UI_KEY_FIELDS / UI_URL_FIELDS have to agree -- override_for() looks a
+    field up by the name in those maps and reads it off the request with getattr(). A
+    second hand-maintained copy would drift the first time a provider was added, and the
+    symptom would be a key typed into the sidebar silently ignored on one endpoint and
+    honoured on another."""
+    anthropic_key: str | None = None
+    openai_key: str | None = None
+    gemini_key: str | None = None
+    openrouter_key: str | None = None
+    huggingface_key: str | None = None
+    ollama_url: str | None = None
+
+
+class GenerateRequest(Credentials):
     model: str
     system_prompt: str | None = "You are a helpful assistant."
     prompt: str
@@ -215,17 +246,14 @@ class GenerateRequest(BaseModel):
     temperature: float = 0.7
     top_p: float = 0.9
     max_tokens: int = 2048
-    anthropic_key: str | None = None
-    openai_key: str | None = None
-    gemini_key: str | None = None
-    openrouter_key: str | None = None
-    huggingface_key: str | None = None
-    ollama_url: str | None = None
 
 
-def override_for(req: GenerateRequest, service: str, fields: dict[str, str]) -> str | None:
+def override_for(req: Credentials, service: str, fields: dict[str, str]) -> str | None:
     """The per-session UI override for `service`, or None when the UI has no field for it
-    or the field was left empty (an empty string means "not set", never "blank key")."""
+    or the field was left empty (an empty string means "not set", never "blank key").
+
+    Typed against Credentials rather than one request model, so every endpoint that can
+    carry a key resolves it the same way."""
     field = fields.get(service)
     value = getattr(req, field, None) if field else None
     if not value:
@@ -752,12 +780,14 @@ def generate(req: GenerateRequest):
 
     # Refused here, plainly, rather than further down where it would read as a provider
     # failure: the library can generate video, this interface cannot request it yet.
-    if model_info.modality not in UI_MODALITIES:
+    if model_info.modality not in GENERATE_MODALITIES:
         raise HTTPException(
             status_code=400,
             detail=(f"Model {req.model!r} produces {model_info.modality!r}, which this"
-                    " workbench has no controls for yet. The library supports it; the UI"
-                    " does not."),
+                    f" endpoint does not dispatch (it handles:"
+                    f" {', '.join(sorted(GENERATE_MODALITIES))})."
+                    + (" Submit video through /api/video/submit instead."
+                       if model_info.modality == VIDEO else "")),
         )
 
     try:
@@ -871,10 +901,11 @@ def generate(req: GenerateRequest):
             context_entry = {"role": "assistant",
                              "content": media_placeholder(modality, req.prompt)}
         else:
-            # Unreachable while UI_MODALITIES gates the model above, and spelled out so it
-            # stays that way: this used to be a bare `else` that treated anything not text
-            # or image as speech, which would have sent a video request to the
-            # text-to-speech endpoint and labelled the result "audio" in the transcript.
+            # Unreachable while GENERATE_MODALITIES gates the model above, and spelled
+            # out so it stays that way: this used to be a bare `else` that treated
+            # anything not text or image as speech, which would have sent a video request
+            # to the text-to-speech endpoint and labelled the result "audio" in the
+            # transcript.
             raise HTTPException(
                 status_code=400,
                 detail=f"No dispatch for modality {modality!r}.",
@@ -926,3 +957,445 @@ def generate(req: GenerateRequest):
         },
         "context_payload": context_payload,
     }
+
+
+# -------------------------------- video jobs --------------------------------- #
+# Video is the one modality that cannot be a request that returns its own result. A Veo
+# generation runs for tens of seconds to minutes, and every provider the library targets
+# is submit-then-poll, so the shape here is: submit and record, poll until terminal, then
+# serve the file. Three consequences drive everything below.
+#
+#   * The job outlives its request, and routinely the server process too. So it is
+#     written to disk before the submitting response returns (see videostore).
+#   * The video cannot be a base64 data URL the way a generated image or a speech clip is.
+#     Tens of megabytes becomes a third more again as base64, has to be held in memory
+#     whole, and cannot be seeked -- a <video> element wants byte ranges. So the bytes
+#     land in a file and are served from an endpoint.
+#   * Credentials are per-request and never stored, which is what makes a restart only
+#     partly recoverable. Said plainly at poll_video_job() rather than worked around.
+
+# The library's role names. corbelity.model_client exports the VIDEO_ROLES tuple but not
+# the individual names, so they are spelled out here -- and then derived back through
+# VIDEO_ROLES below, which is what makes a rename in the library a loud failure instead of
+# a role that silently never matches a constraint again.
+FIRST_FRAME = "first_frame"
+LAST_FRAME = "last_frame"
+REFERENCES = "references"
+
+# The roles this interface can supply, in the library's own order, which is the order a
+# catalog constraint's `when` is matched against.
+#
+# `extend` is the one role deliberately left out. It takes a provider-side handle to a
+# clip that same service generated and still holds -- not an upload -- so it means
+# chaining a previous job's result, which needs a control this panel does not have yet.
+# `references` IS accepted even though the shipped catalog refuses it for every video
+# model it lists, because that refusal belongs to the catalog: when model-client enables
+# references, this starts working with no edit here, and until then the user gets the
+# library's own message naming what the model does take.
+VIDEO_INPUT_ROLES = tuple(
+    role for role in VIDEO_ROLES if role in {FIRST_FRAME, LAST_FRAME, REFERENCES}
+)
+if len(VIDEO_INPUT_ROLES) != 3:
+    # Not an assert: this must hold under -O as well. A library rename here would
+    # otherwise quietly remove a frame control rather than failing the launch.
+    raise RuntimeError(
+        "corbelity.model_client no longer names the video input roles this workbench "
+        f"supplies; it offers {VIDEO_ROLES!r}. The frame controls need updating."
+    )
+
+# The library's VideoState values. Not exported either -- its public surface for state is
+# the VideoStatus dataclass and its `done` property -- so these are pinned by a test that
+# round-trips each one through VideoStatus.done rather than by an import.
+VIDEO_RUNNING = "running"
+VIDEO_SUCCEEDED = "succeeded"
+VIDEO_FAILED = "failed"
+VIDEO_FILTERED = "filtered"
+VIDEO_TERMINAL = frozenset({VIDEO_SUCCEEDED, VIDEO_FAILED, VIDEO_FILTERED})
+
+# How many recent jobs the page is offered when it loads and looks for what it was
+# watching.
+VIDEO_JOB_LIST_LIMIT = 50
+
+# A 1x1 opaque PNG. Stands in for an attached frame when /api/video/check is asked whether
+# a COMBINATION is allowed -- see probe_inputs() for why that is the honest thing there
+# and not a shortcut.
+_PROBE_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8Dw"
+    "HwAFAAH/q842iQAAAABJRU5ErkJggg=="
+)
+
+
+class VideoSettings(BaseModel):
+    """Output settings for one video generation.
+
+    Field-for-field the library's VideoOptions, so options() is a pass-through and there
+    is no mapping to get wrong (a test asserts the two agree). None means NOT REQUESTED
+    throughout: the key is omitted from the provider call and the provider's own default
+    applies. That is why nothing here defaults to a value -- a default would be this UI
+    choosing a resolution on the caller's behalf and then reporting it as theirs."""
+    aspect_ratio: str | None = None
+    resolution: str | None = None
+    duration_seconds: int | None = None
+    negative_prompt: str | None = None
+    seed: int | None = None
+    person_generation: str | None = None
+    generate_audio: bool | None = None
+
+    def options(self) -> VideoOptions:
+        """The library's VideoOptions, built from this class's OWN fields.
+
+        Not **model_dump(): every subclass carries more than the settings -- a submit
+        request also has the model, the prompt, the frames and the credentials -- and
+        dumping one of those would hand VideoOptions keys it has never heard of. The names
+        come from VideoSettings itself, so adding a setting is still a one-line change
+        here and nowhere else."""
+        return VideoOptions(**{
+            name: getattr(self, name) for name in VideoSettings.model_fields
+        })
+
+
+class VideoCheckRequest(VideoSettings):
+    """Would this combination be accepted? `roles` names the inputs that WOULD be
+    attached rather than carrying them -- see probe_inputs()."""
+    model: str
+    roles: list[str] = []
+
+
+class VideoSubmitRequest(VideoSettings, Credentials):
+    model: str
+    prompt: str
+    first_frame: ImageAttachment | None = None
+    last_frame: ImageAttachment | None = None
+    references: list[ImageAttachment] = []
+
+
+class VideoPollRequest(Credentials):
+    """A poll carries nothing but credentials, and is a POST for exactly that reason: a
+    key belongs in a request body, not in a URL that lands in an access log, the browser's
+    history and a Referer header."""
+
+
+def video_model(model_id: str) -> tuple[ModelInfo, str]:
+    """The catalog entry and resolved service for a video model id.
+
+    Shared by every video endpoint so that "unknown model", "not a video model" and
+    "unknown service" read identically wherever they are hit."""
+    model_info = load_models().get(model_id)
+    if model_info is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(f"Unknown model id {model_id!r}. Add it to your model catalog"
+                    " (see CORBELITY_MODEL_CATALOG) first."),
+        )
+    if model_info.modality != VIDEO:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Model {model_id!r} produces {model_info.modality!r}, not video."
+                    " Use /api/generate for it."),
+        )
+    try:
+        return model_info, resolve_service(model_info.service)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+
+def known_roles(roles: Sequence[str]) -> list[str]:
+    """Validate role names against what this interface supplies.
+
+    Checked here rather than left to the library, because the library would be judging a
+    request it never received: `roles` on a check request is a list of NAMES, so a
+    misspelled one is simply absent -- and the check would then answer, truthfully but
+    uselessly, that a different request is fine."""
+    unknown = [role for role in roles if role not in VIDEO_INPUT_ROLES]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Unknown video input role(s): {', '.join(sorted(set(unknown)))}."
+                    f" This interface supplies: {', '.join(VIDEO_INPUT_ROLES)}."),
+        )
+    return [role for role in VIDEO_INPUT_ROLES if role in roles]
+
+
+def probe_inputs(roles: Sequence[str]) -> VideoInputs:
+    """Stand-ins for the frames a checked request would carry.
+
+    Every rule that can answer "no" to a combination turns on WHICH roles are present,
+    never on what is inside the images: a role the model does not take, a role that
+    requires another, a resolution that forces a duration, a model that always produces
+    audio. So the check takes role names and supplies one valid 1x1 PNG per role, which
+    is what lets the UI re-ask on every change to a dropdown without re-uploading frames.
+
+    What it therefore does NOT judge is the frames themselves -- an unsupported container,
+    or one over the size cap. Those are refused at submission. That division is the honest
+    one, and the check's response says so (`images_checked: false`) rather than letting a
+    green answer imply more than it checked."""
+    stand_in = ImageInput(data=_PROBE_PNG, mime_type="image/png", name="probe.png")
+    return VideoInputs(
+        first_frame=stand_in if FIRST_FRAME in roles else None,
+        last_frame=stand_in if LAST_FRAME in roles else None,
+        references=(stand_in,) if REFERENCES in roles else (),
+    )
+
+
+def video_inputs(req: VideoSubmitRequest,
+                 client: httpx.Client | None = None,
+                 resolve: HostResolver | None = None) -> tuple[VideoInputs, list[str]]:
+    """Decode the attached frames into library inputs, and name the roles supplied.
+
+    Every attachment goes through normalize_attachments() in ONE call, so the per-image
+    and per-request byte caps apply across the roles together: three 8 MB frames are 24 MB
+    on the wire whichever roles they arrived in. That also means MAX_INPUT_IMAGES counts
+    frames and references together, which can bite before a model's own max_references
+    does -- the message names the limit either way.
+
+    The decoded images come back in the order they went in, which is what lets them be
+    split back out by role."""
+    attachments: list[ImageAttachment] = []
+    roles: list[str] = []
+    for role, item in ((FIRST_FRAME, req.first_frame), (LAST_FRAME, req.last_frame)):
+        if item is not None:
+            attachments.append(item)
+            roles.append(role)
+    frame_count = len(attachments)
+    attachments.extend(req.references)
+
+    images = normalize_attachments(attachments, client, resolve)
+    by_role = dict(zip(roles, images[:frame_count], strict=True))
+    if req.references:
+        roles.append(REFERENCES)
+    return (
+        VideoInputs(
+            first_frame=by_role.get(FIRST_FRAME),
+            last_frame=by_role.get(LAST_FRAME),
+            references=tuple(images[frame_count:]),
+        ),
+        [role for role in VIDEO_INPUT_ROLES if role in roles],
+    )
+
+
+def public_job(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A stored job as the browser sees it.
+
+    Two shaping steps. The on-disk file name becomes the URL that serves it, and only when
+    the file is really there -- a video_url on a row whose file is missing is a broken
+    <video> element and a support question. And elapsed time is computed HERE rather than
+    left to the page: submitted_at is server wall clock, and a browser whose clock is off
+    by a minute would otherwise render a job as having taken a minute longer than it did.
+
+    Nothing is redacted, because nothing secret is stored: a credential never reaches this
+    table."""
+    record = {name: row[name] for name in (
+        "id", "service", "model", "operation", "submitted_at", "requested", "prompt",
+        "roles", "state", "error", "filtered_reasons", "mime_type", "size_bytes",
+        "finished_at",
+    )}
+    record["video_url"] = (
+        f"/api/video/jobs/{row['id']}/file" if videostore.file_path(row) else None
+    )
+    submitted, finished = row["submitted_at"], row["finished_at"]
+    if submitted is None:
+        # The library leaves submitted_at None for a job resumed from a bare operation id,
+        # and reports elapsed the same way rather than inventing a start.
+        record["elapsed_s"] = None
+    else:
+        end = finished if finished is not None else time.time()
+        record["elapsed_s"] = round(max(0.0, end - submitted), 1)
+    return record
+
+
+@app.post("/api/video/check")
+def check_video(req: VideoCheckRequest):
+    """Would this combination be accepted? Answered by the same function a submission runs.
+
+    resolve_video_request() IS the validation submit_video() performs -- the service's
+    capability, then the catalog's stated capability for this model, with any setting a
+    constraint forces filled in -- minus the client, the credential and the network. So
+    the UI can refuse an impossible choice using the real rules rather than a copy of the
+    constraint table in JavaScript, and a catalog edit changes both at once.
+
+    A refusal is a 200 with ok=false, NOT a 400. "No, because 1080p forces 8 seconds" is
+    the expected answer to this question, and the UI asks it on every change to a control;
+    turning each of those into a client error would fill the console with red and make a
+    real fault invisible. A 400 here means the question itself was malformed -- an unknown
+    model, a misspelled role."""
+    model_info, service = video_model(req.model)
+    roles = known_roles(req.roles)
+    try:
+        resolved = resolve_video_request(
+            service, req.model, probe_inputs(roles), req.options(), config=CONFIG
+        )
+    except (UnsupportedModalityError, UnsupportedVideoInputError, ValueError) as err:
+        # Two families, both expected here: the input-role refusals are ModelClientError
+        # (RuntimeError), while every setting refusal and every structural complaint is a
+        # ValueError -- which also covers UnsupportedVideoSettingError and
+        # TooManyImagesError, both of which subclass it.
+        return {"ok": False, "detail": str(err), "images_checked": False}
+    return {
+        "ok": True,
+        # What would actually be SENT, which is not always what was asked for: a
+        # constraint fills a setting left unset, so the UI can show the 8 seconds that
+        # 1080p implies instead of leaving the field blank and the user guessing.
+        "resolved": resolved.requested(),
+        "capabilities": asdict(model_info.video) if model_info.video is not None else None,
+        "images_checked": False,
+    }
+
+
+@app.post("/api/video/submit")
+def submit_video(req: VideoSubmitRequest):
+    # Not async, for the reason generate() is not: the provider SDK call blocks, and
+    # FastAPI runs a plain `def` in a threadpool. This one returns in about one round trip
+    # to the provider -- the whole point of the submit-then-poll shape is that the
+    # generation happens after the response has gone.
+    _, service = video_model(req.model)
+    inputs, roles = video_inputs(req)
+    try:
+        client = make_model_client(
+            service,
+            model=req.model,
+            api_key=override_for(req, service, UI_KEY_FIELDS),
+            base_url=override_for(req, service, UI_URL_FIELDS),
+            trace=TRACE,
+        )
+        job = client.submit_video(
+            req.prompt,
+            first_frame=inputs.first_frame,
+            last_frame=inputs.last_frame,
+            references=inputs.references,
+            # Only the settings that were set, so an unrequested one stays unrequested
+            # rather than being sent as an explicit None.
+            **req.options().requested(),
+        )
+    except (UnsupportedModalityError, UnsupportedVideoInputError,
+            UnsupportedImageInputError, ValueError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    except Exception as err:
+        logger.exception("Video submission failed for %s via %s", req.model, service)
+        raise HTTPException(status_code=500, detail=f"{type(err).__name__}: {err}") from err
+
+    # Recorded before the response goes out. A submission that is not recorded is a job
+    # that is running, billed, and unreachable -- the exact condition the library's two
+    # trace records exist to expose after the fact, and this table exists to prevent.
+    row = videostore.record_submission(
+        videostore.new_job_id(), job.to_ref(), prompt=req.prompt, roles=roles,
+    )
+    return public_job(row)
+
+
+@app.get("/api/video/jobs")
+def list_video_jobs():
+    """Jobs this server knows about, newest first.
+
+    This is what makes a restart survivable from the page's side: it reloads, asks for
+    this, and finds the job it was watching -- including one that finished while nothing
+    was looking at it."""
+    return {
+        "jobs": [public_job(row) for row in videostore.list_jobs(VIDEO_JOB_LIST_LIMIT)]
+    }
+
+
+@app.get("/api/video/jobs/{job_id}")
+def get_video_job(job_id: str):
+    """What is already known about a job, without contacting the provider.
+
+    Kept separate from the poll below so that rendering the page is never a billable or
+    rate-limited act: opening the job list polls nothing."""
+    row = videostore.get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No video job {job_id!r}.")
+    return public_job(row)
+
+
+@app.post("/api/video/jobs/{job_id}/poll")
+def poll_video_job(job_id: str, req: VideoPollRequest):
+    """Ask the provider where a job is, and store the outcome once it has one.
+
+    A job already finished is answered from the table and the provider is NOT contacted.
+    That mirrors the library's own job, which finalizes exactly once and then serves from
+    its cache; this is the same contract carried across a restart.
+
+    Credentials are the one thing a restart genuinely loses. A key typed into the sidebar
+    is a per-request override and is deliberately never written to disk, so a job polled
+    after a restart needs either that key sent again -- which is what this request body is
+    for -- or the provider's environment variable. When it has neither, the client
+    constructor raises a ValueError naming the variable, which becomes a 400 here, and
+    that message is the right one to show.
+
+    Not async: resume_video() and poll() both talk to the provider and block."""
+    row = videostore.get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No video job {job_id!r}.")
+    if row["state"] in VIDEO_TERMINAL:
+        return public_job(row)
+
+    service = row["service"]
+    try:
+        client = make_model_client(
+            service,
+            model=row["model"],
+            api_key=override_for(req, service, UI_KEY_FIELDS),
+            base_url=override_for(req, service, UI_URL_FIELDS),
+            trace=TRACE,
+        )
+        job = client.resume_video(videostore.ref_for(row))
+        status = job.poll()
+    except VideoJobNotFoundError as err:
+        # The provider has forgotten it: generated videos are kept for a limited time
+        # (Veo: two days). Recorded as failed so the row stops being polled forever, and
+        # reported as 410 rather than 404 -- the job existed, and the distinction is the
+        # difference between "wrong id" and "too late".
+        stored = videostore.record_terminal(
+            job_id,
+            VideoStatus(state=VIDEO_FAILED, elapsed_s=None,
+                        error=f"The provider no longer has this job: {err}"),
+        )
+        raise HTTPException(status_code=410, detail=stored["error"]) from err
+    except ValueError as err:
+        # Missing credential, missing endpoint, or a stored reference that will not load.
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    except Exception as err:
+        # Including a failed download of a finished video, which the library raises and
+        # leaves unfinalized precisely so the next poll retries it. Nothing is recorded.
+        logger.exception("Polling video job %s failed", job_id)
+        raise HTTPException(
+            status_code=503,
+            detail=(f"Could not get the state of this job from {service!r}"
+                    f" ({type(err).__name__}: {err}). It is still running, and polling"
+                    " again is safe."),
+        ) from err
+
+    if not status.done:
+        return {**public_job(row), "progress": status.progress}
+
+    # Only a succeeded job has a video. result() is reading the cache poll() just filled,
+    # so this makes no second call -- and is not asked of a failed or filtered job, where
+    # it would raise instead of returning the reason the status already carries.
+    media = job.result() if status.state == VIDEO_SUCCEEDED else None
+    stored = videostore.record_terminal(job_id, status, media)
+    return {**public_job(stored), "progress": status.progress}
+
+
+@app.get("/api/video/jobs/{job_id}/file")
+def download_video_job(job_id: str):
+    """The finished video, as a file.
+
+    A FileResponse rather than the base64 data URL images and speech come back as: a clip
+    is tens of megabytes, base64 would add a third again, and a <video> element wants byte
+    ranges to seek -- which a data URL cannot serve and Starlette's FileResponse can.
+
+    No `filename=`, deliberately: it would set Content-Disposition: attachment, and some
+    browsers then refuse to play the response inline. The page offers a download link with
+    the HTML `download` attribute instead, which names the file without changing how the
+    response can be used."""
+    row = videostore.get_job(job_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"No video job {job_id!r}.")
+    path = videostore.file_path(row)
+    if path is None:
+        detail = f"Video job {job_id!r} is {row['state']!r} and has no video file."
+        if row["error"]:
+            detail += f" {row['error']}"
+        if row["filtered_reasons"]:
+            detail += f" Filtered: {', '.join(row['filtered_reasons'])}."
+        raise HTTPException(status_code=404, detail=detail)
+    return FileResponse(path, media_type=row["mime_type"] or "application/octet-stream")

@@ -226,3 +226,9 @@ my-models*.json
 
 # local folder for git commit messages
 .git-msgs/
+
+# Submitted video jobs: the SQLite job table and the generated clips beside it. Tens of
+# megabytes each, and local state by nature -- a job reference is only meaningful to the
+# provider account that created it. WORKBENCH_VIDEO_DIR moves the directory; this ignores
+# the default location.
+media/

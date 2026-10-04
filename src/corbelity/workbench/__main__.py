@@ -55,6 +55,12 @@ def main(argv: list[str] | None = None) -> None:
             file=sys.stderr,
         )
 
+    # Created here rather than on the first submission, and here rather than at import,
+    # so that a media directory which cannot be written fails the launch with its path in
+    # the message -- while importing the app (as the tests do) still writes nothing.
+    from . import videostore
+    videostore.init_db()
+
     uvicorn.run("corbelity.workbench.app:app", host=args.host, port=args.port,
                 reload=args.reload)
 
