@@ -109,6 +109,12 @@ def test_key_origin_honours_every_name_a_provider_accepts(monkeypatch):
     ("anthropic", "anthropic_key"),
     ("openai", "openai_key"),
     ("gemini", "gemini_key"),
+    # The native Google route is a separate service with the same credential. Asserted
+    # explicitly because the catalog decides which route a model takes, so this mapping is
+    # the only thing stopping a typed key from being dropped when the flagship model moves
+    # between the two. Checks the map and override_for, neither of which consults the
+    # registry, so it holds whether or not the installed model-client registers it yet.
+    ("gemini-native", "gemini_key"),
     ("openrouter", "openrouter_key"),
     ("huggingface", "huggingface_key"),
 ])
@@ -119,6 +125,44 @@ def test_every_keyed_service_has_a_ui_override_field(service, field):
     assert workbench.UI_KEY_FIELDS[service] == field
     req = GenerateRequest(model="m", prompt="p", **{field: "ui-value"})
     assert workbench.override_for(req, service, workbench.UI_KEY_FIELDS) == "ui-value"
+
+
+def test_services_sharing_a_credential_share_the_ui_field():
+    """If two services read the same environment variable, they are two routes to one
+    account, and both must map to the same sidebar field.
+
+    This is the general form of the gemini / gemini-native bug: the catalog moved a model
+    from one route to the other, the key map knew only the old name, and a key typed into
+    the sidebar was silently dropped in favour of the environment -- a different credential
+    than the one asked for, with no error. Written against the registry rather than a fixed
+    list so the next provider split cannot reopen it.
+
+    Services whose credential nothing else shares are skipped: Ollama Cloud deliberately
+    has no sidebar field, and that is an omission rather than an inconsistency.
+    """
+    registered = set(known_services())
+
+    field_by_env: dict[str, str] = {}
+    for service, field in workbench.UI_KEY_FIELDS.items():
+        if service not in registered:
+            continue   # mapped ahead of the dependency that registers it; inert for now
+        for name in provider_spec(service).key_env:
+            field_by_env[name] = field
+
+    for service in sorted(registered):
+        fields = {field_by_env[name] for name in provider_spec(service).key_env
+                  if name in field_by_env}
+        if not fields:
+            continue
+        assert service in workbench.UI_KEY_FIELDS, (
+            f"{service!r} shares a credential with a service that has a sidebar field, but"
+            f" has no entry in UI_KEY_FIELDS -- a key typed there is silently ignored for"
+            f" models routed to {service!r}."
+        )
+        assert workbench.UI_KEY_FIELDS[service] in fields, (
+            f"{service!r} maps to {workbench.UI_KEY_FIELDS[service]!r}, but shares its"
+            f" credential with a service mapped to {fields}. One account, one field."
+        )
 
 
 def test_gemini_accepts_either_google_credential(monkeypatch):
@@ -224,14 +268,40 @@ def test_models_without_vision_are_not_flagged():
     assert catalog.get("llama3:latest").accepts_images is False
 
 
-def test_only_text_and_image_models_are_flagged_for_image_input():
-    """accepts_images covers two different things: a text model READS an image, and an
-    image model takes REFERENCE images to condition what it generates. Speech takes
-    neither, so a sound entry carrying the flag describes a request /api/generate
-    refuses."""
+def test_sound_models_are_never_flagged_for_image_input():
+    """accepts_images means several different things depending on what the model produces:
+    a text model READS the image, an image model takes REFERENCES to condition its output,
+    and a video model takes a first or last frame. Sound takes none of them, so a sound
+    entry carrying the flag describes a request /api/generate refuses.
+
+    Asserted as "not sound" rather than as a list of permitted modalities. The list version
+    failed the moment the catalog gained video, which is a catalog growing normally rather
+    than anything breaking -- a test that has to be edited every time a modality is added
+    is measuring the wrong thing."""
     for model in workbench.load_models():
         if model.accepts_images:
-            assert model.modality in ("text", "image"), model.id
+            assert model.modality != "sound", model.id
+
+
+def test_a_modality_the_ui_cannot_drive_is_refused():
+    """model-client generates video; this UI has no pill and no dispatch branch for it.
+    Refused on the model's catalogued modality, because the sidebar cannot post "video" at
+    all -- selecting a Veo model leaves the previous pill active, so the request arrives
+    claiming to be text and would otherwise be sent to a text completion."""
+    video = [m for m in workbench.load_models() if m.modality not in workbench.UI_MODALITIES]
+    if not video:
+        pytest.skip("catalog has no modality beyond text, image and sound")
+    response = TestClient(workbench.app).post("/api/generate", json={
+        "model": video[0].id, "prompt": "a drone shot over a city", "modality": "text"})
+    assert response.status_code == 400
+    assert "no controls for yet" in response.json()["detail"]
+
+
+def test_the_video_models_are_catalogued_but_not_yet_drivable():
+    """Pins the current state rather than asserting video is absent: 0.4.0 put Veo in the
+    built-in catalog, and this test is what should fail when the UI grows video support,
+    prompting its removal alongside UI_MODALITIES."""
+    assert "video" not in workbench.UI_MODALITIES
 
 
 def test_the_reference_image_path_is_reachable():

@@ -119,10 +119,20 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # the local Ollama host takes an endpoint override. Everything else about credentials --
 # which environment variables, in what order -- is the client's business, read from its
 # ProviderSpec rather than duplicated here.
+# A service may appear here before the installed model-client registers it: the value is
+# only ever read via override_for(), which looks the service up in THIS map rather than in
+# the registry, so an entry for a service that does not exist yet is inert.
 UI_KEY_FIELDS: dict[str, str] = {
     "anthropic": "anthropic_key",
     "openai": "openai_key",
+    # Two services, one credential. Google is reachable either through its
+    # OpenAI-compatibility endpoint (`gemini`) or its native SDK (`gemini-native`), and the
+    # catalog entry decides which a given model uses -- so the same typed key has to serve
+    # both, or picking a model silently changes which credential is applied. They share
+    # key_env (GEMINI_API_KEY, then GOOGLE_API_KEY), which is why one field is correct here
+    # rather than a second input that would hold the same value.
     "gemini": "gemini_key",
+    "gemini-native": "gemini_key",
     "openrouter": "openrouter_key",
     "huggingface": "huggingface_key",
 }
@@ -130,6 +140,13 @@ UI_URL_FIELDS: dict[str, str] = {"ollama-local": "ollama_url"}
 
 # The UI's sound pill posts "sound"; accept the obvious synonyms too.
 MODALITY_ALIASES = {"audio": SOUND, "speech": SOUND, "img": IMAGE}
+
+# What this UI can actually drive: one pill each, and a dispatch branch in generate().
+# model-client 0.4.0 added video, which has neither -- the sidebar has no video pill, so
+# selecting a Veo model leaves whatever pill was already active and the request arrives
+# claiming to be text. Checked against the MODEL's catalogued modality rather than the
+# requested one, because that mismatch is exactly what has to be caught.
+UI_MODALITIES = frozenset({TEXT, IMAGE, SOUND})
 
 # How long a media prompt may be inside a context placeholder before it is trimmed.
 MEDIA_PLACEHOLDER_PROMPT_CHARS = 200
@@ -733,6 +750,16 @@ def generate(req: GenerateRequest):
                     " (see CORBELITY_MODEL_CATALOG) first."),
         )
 
+    # Refused here, plainly, rather than further down where it would read as a provider
+    # failure: the library can generate video, this interface cannot request it yet.
+    if model_info.modality not in UI_MODALITIES:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"Model {req.model!r} produces {model_info.modality!r}, which this"
+                    " workbench has no controls for yet. The library supports it; the UI"
+                    " does not."),
+        )
+
     try:
         service = resolve_service(model_info.service)
         available = supported_modalities(service)
@@ -839,11 +866,24 @@ def generate(req: GenerateRequest):
             content = data_url(client.generate_image(req.prompt, images=pictures))
             context_entry = {"role": "assistant",
                              "content": media_placeholder(modality, req.prompt, pictures)}
-        else:
+        elif modality == SOUND:
             content = data_url(client.generate_speech(req.prompt))
             context_entry = {"role": "assistant",
                              "content": media_placeholder(modality, req.prompt)}
+        else:
+            # Unreachable while UI_MODALITIES gates the model above, and spelled out so it
+            # stays that way: this used to be a bare `else` that treated anything not text
+            # or image as speech, which would have sent a video request to the
+            # text-to-speech endpoint and labelled the result "audio" in the transcript.
+            raise HTTPException(
+                status_code=400,
+                detail=f"No dispatch for modality {modality!r}.",
+            )
 
+    except HTTPException:
+        # Raised deliberately inside this block (the no-dispatch guard above). Without this
+        # passthrough the catch-all below would rewrap it as a 500 and bury the reason.
+        raise
     except (UnsupportedModalityError, UnsupportedImageInputError, TooManyImagesError) as err:
         # Capability mismatches, all of them the caller's to fix: the service cannot
         # produce this modality, cannot take reference images at all, or was given more

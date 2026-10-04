@@ -223,3 +223,6 @@ __marimo__/
 
 # local model list
 my-models*.json
+
+# local folder for git commit messages
+.git-msgs/
