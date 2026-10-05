@@ -283,25 +283,36 @@ def test_sound_models_are_never_flagged_for_image_input():
             assert model.modality != "sound", model.id
 
 
-def test_a_modality_the_ui_cannot_drive_is_refused():
-    """model-client generates video; this UI has no pill and no dispatch branch for it.
-    Refused on the model's catalogued modality, because the sidebar cannot post "video" at
-    all -- selecting a Veo model leaves the previous pill active, so the request arrives
-    claiming to be text and would otherwise be sent to a text completion."""
-    video = [m for m in workbench.load_models() if m.modality not in workbench.UI_MODALITIES]
-    if not video:
+def test_a_modality_this_endpoint_does_not_dispatch_is_refused():
+    """/api/generate returns the result it produced, so it can only serve a modality that
+    finishes inside one request. Refused on the model's CATALOGUED modality, because the
+    sidebar cannot post "video" at all -- selecting a Veo model leaves the previous pill
+    active, so the request arrives claiming to be text and would otherwise be sent to a
+    text completion."""
+    other = [m for m in workbench.load_models()
+             if m.modality not in workbench.GENERATE_MODALITIES]
+    if not other:
         pytest.skip("catalog has no modality beyond text, image and sound")
+    response = TestClient(workbench.app).post("/api/generate", json={
+        "model": other[0].id, "prompt": "a drone shot over a city", "modality": "text"})
+    assert response.status_code == 400
+    assert "does not dispatch" in response.json()["detail"]
+
+
+def test_video_is_sent_to_the_video_endpoint_instead_of_being_turned_away():
+    """Video is absent from GENERATE_MODALITIES because it is submit-then-poll, not
+    because it is unsupported -- so the refusal has to name where it does belong. A
+    message that only said no would be the same message as for a modality the workbench
+    genuinely cannot do, and would send someone looking for a missing feature that is
+    already there."""
+    video = [m for m in workbench.load_models() if m.modality == "video"]
+    if not video:
+        pytest.skip("catalog has no video models")
+    assert "video" not in workbench.GENERATE_MODALITIES
     response = TestClient(workbench.app).post("/api/generate", json={
         "model": video[0].id, "prompt": "a drone shot over a city", "modality": "text"})
     assert response.status_code == 400
-    assert "no controls for yet" in response.json()["detail"]
-
-
-def test_the_video_models_are_catalogued_but_not_yet_drivable():
-    """Pins the current state rather than asserting video is absent: 0.4.0 put Veo in the
-    built-in catalog, and this test is what should fail when the UI grows video support,
-    prompting its removal alongside UI_MODALITIES."""
-    assert "video" not in workbench.UI_MODALITIES
+    assert "/api/video/submit" in response.json()["detail"]
 
 
 def test_the_reference_image_path_is_reachable():

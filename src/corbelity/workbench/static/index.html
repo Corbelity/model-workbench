@@ -64,7 +64,26 @@
                         <button class="pill-btn active" data-modality="text" aria-pressed="true">Text</button>
                         <button class="pill-btn" data-modality="image" aria-pressed="false">Image</button>
                         <button class="pill-btn" data-modality="sound" aria-pressed="false">Sound</button>
+                        <button class="pill-btn" data-modality="video" aria-pressed="false">Video</button>
                     </div>
+                </div>
+
+                <!-- VIDEO SETTINGS -- generated from the selected model's catalog `video`
+                     block, which /api/models already publishes (ModelInfo.video is a
+                     dataclass, so the asdict() there recurses into it). Nothing about the
+                     axes or their values is written here: a model that offers different
+                     resolutions gets different options with no change to this file. -->
+                <div class="control-group video-group hidden" id="videoGroup">
+                    <label id="videoSettingsLabel">Video settings</label>
+                    <div id="videoSettings" class="video-settings" role="group"
+                        aria-labelledby="videoSettingsLabel"></div>
+                    <label for="videoNegative">Negative prompt</label>
+                    <textarea id="videoNegative" class="textarea-control" rows="2"
+                        placeholder="What to keep out of the shot…"></textarea>
+                    <p class="field-hint">A video request carries the prompt, the frames and
+                        these settings — not the system instruction, the sampling sliders or
+                        the conversation.</p>
+                    <p id="videoCheck" class="field-hint video-check" role="status"></p>
                 </div>
 
                 <!-- Sliders -->
@@ -92,7 +111,7 @@
                         choices.</p>
                 </div>
 
-                <div class="control-group">
+                <div class="control-group" id="tokensGroup">
                     <div class="label-with-value">
                         <label for="maxTokensInput">Max tokens</label>
                         <span id="tokensValue" class="slider-val">2048</span>
@@ -151,6 +170,7 @@
                         <button class="btn-secondary" data-preset="creative">Creative</button>
                         <button class="btn-secondary" data-preset="image">Image</button>
                         <button class="btn-secondary" data-preset="audio">Audio</button>
+                        <button class="btn-secondary" data-preset="video">Video</button>
                     </div>
                 </div>
             </div>
@@ -212,6 +232,34 @@
                         <span id="attachSummary" class="attach-summary"></span>
                     </div>
                     <div id="attachList" class="attach-list"></div>
+
+                    <!-- VIDEO FRAMES -- inputs by ROLE, which is how the library takes
+                         them. Deliberately NOT gated against each other here: whether a
+                         last frame requires a first frame is a catalog constraint, and
+                         /api/video/check answers that with the library's own words. A
+                         copy of the rule in this file is the copy that goes stale. -->
+                    <div id="videoFrames" class="video-frames hidden">
+                        <div class="video-frame">
+                            <span class="video-frame-role">First frame</span>
+                            <button type="button" class="btn-secondary"
+                                data-frame-pick="first_frame">Choose…</button>
+                            <input type="file" data-frame-input="first_frame" hidden
+                                accept="image/png,image/jpeg,image/gif,image/webp">
+                            <span class="video-frame-name" data-frame-name="first_frame">none</span>
+                            <button type="button" class="attach-remove" hidden
+                                data-frame-clear="first_frame" title="Remove this frame">&times;</button>
+                        </div>
+                        <div class="video-frame">
+                            <span class="video-frame-role">Last frame</span>
+                            <button type="button" class="btn-secondary"
+                                data-frame-pick="last_frame">Choose…</button>
+                            <input type="file" data-frame-input="last_frame" hidden
+                                accept="image/png,image/jpeg,image/gif,image/webp">
+                            <span class="video-frame-name" data-frame-name="last_frame">none</span>
+                            <button type="button" class="attach-remove" hidden
+                                data-frame-clear="last_frame" title="Remove this frame">&times;</button>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="action-row">
@@ -228,6 +276,19 @@
                     <div class="placeholder-text">Run a prompt to see text, image, or sound results here.</div>
                 </div>
 
+                <!-- VIDEO JOBS -- video has no single result to show. A job is submitted,
+                     watched while it runs, and played when it lands, and it outlives both
+                     the request and the page: this list is repopulated from the server on
+                     load, so a generation interrupted by a restart is picked back up. -->
+                <div id="videoJobs" class="video-jobs hidden">
+                    <div class="video-jobs-head">
+                        <span id="videoJobsSummary" class="context-summary">no jobs yet</span>
+                        <button id="refreshJobsBtn" class="text-btn"
+                            title="Ask the server what it knows about these jobs">Refresh</button>
+                    </div>
+                    <div id="videoJobList" class="video-job-list"></div>
+                </div>
+
                 <!-- METRICS & COST BAR -->
                 <div id="metricsBar" class="metrics-bar hidden">
                     <div class="metric-item">
@@ -242,7 +303,7 @@
                 </div>
 
                 <!-- REQUEST PAYLOAD DRAWER (not the conversation context - see above) -->
-                <details class="context-drawer">
+                <details class="context-drawer" id="payloadDrawer">
                     <summary>Show request payload</summary>
                     <pre><code id="contextJson" class="language-json">// The serialized payload appears here after a run.</code></pre>
                 </details>

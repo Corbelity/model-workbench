@@ -168,7 +168,75 @@ line **reported rather than swallowed**. A partial trace is the normal end state
 interrupted run, so refusing to open one would make the tool useless exactly when it is most
 needed.
 
-## 12. What is deliberately not here
+## 12. Video is submitted, not awaited — and the job outlives the request
+
+Every other modality finishes inside one request: `/api/generate` calls the provider, gets
+bytes back, and returns them. Video cannot work that way. A generation runs for tens of
+seconds to minutes, and every provider the library targets is submit-then-poll. So video
+has its own endpoints and its own shape:
+
+| | |
+|---|---|
+| `POST /api/video/check` | would this combination be accepted? No client, no credential, no network. |
+| `POST /api/video/submit` | start it; returns a job row in about one round trip. |
+| `GET /api/video/jobs` | what this server knows about, newest first. |
+| `GET /api/video/jobs/{id}` | one job, from the table — polls nothing. |
+| `POST /api/video/jobs/{id}/poll` | ask the provider, and record a terminal outcome. |
+| `GET /api/video/jobs/{id}/file` | the finished clip. |
+
+Four decisions follow from that shape.
+
+**The job is written to disk before the submitting response returns.** A submission that is
+not recorded is a job that is running, billed, and unreachable — the provider keeps working
+whether or not anyone still knows the operation id. The store is stdlib `sqlite3` with the
+clips as files beside it: a row per job holding everything the library's `VideoJobRef`
+carries, which is what `resume_video()` needs to pick a job up in another process. This is
+the one place the workbench holds state, and §1 still holds for conversations — a job is
+not a conversation.
+
+**The clip is a file, not a data URL.** Generated images and speech are inlined as base64
+(§2 covers what enters the transcript). A video cannot be: tens of megabytes becomes a
+third more again as base64, has to be held in memory whole to build, and a `<video>`
+element wants byte ranges to seek, which a data URL cannot serve.
+
+**A refused combination is an answer, not an error.** `/api/video/check` calls the
+library's `resolve_video_request()` — *the same function a real submission runs*, minus the
+client and the credential. So the UI refuses an impossible choice using the real rules
+rather than a copy of the constraint table in JavaScript, and a catalog edit changes both
+at once. It returns `200` with `ok: false`, because the UI asks on every change to a
+control and a 400 per refusal would fill the console with red. A `400` there means the
+*question* was malformed. The check judges the combination, not the frames, and says so
+(`images_checked: false`) so a green answer is not read as more than it checked.
+
+**Credentials are the one thing a restart loses.** A key typed into the sidebar is a
+per-request override and is deliberately never written to the job table, so a job polled
+after a restart needs that key sent again — which is why the poll is a `POST` with a body
+rather than a `GET` with the key in a URL that lands in an access log — or the provider's
+environment variable. Nothing else about the job is lost.
+
+Video is absent from `GENERATE_MODALITIES` for this reason and not because it is
+unsupported, so `/api/generate` names where it does belong rather than only saying no.
+
+The panel follows from the same decision. Its settings are **generated from the selected
+model's catalog `video` block**, which `/api/models` already publishes — `ModelInfo.video`
+is a dataclass, so the `asdict()` already there recurses into it. Nothing about which
+resolutions or durations exist is written in the page. An axis the catalog does not state
+becomes a free-text field rather than a disabled one, because "not stated" means the
+provider decides, not that nothing may be asked for.
+
+Nothing in the page restates a constraint. Whether a last frame needs a first frame, or
+1080p forces eight seconds, is answered by `/api/video/check` on every control change —
+so the refusal the user reads is the library's own sentence. A forced value is printed
+*beside* its control rather than typed into it: in the control it would look like the
+user's own choice on the next check, and a later conflicting edit would then read as
+their mistake.
+
+A job carries its own transcript turns (`transcript_entries`, on success only), for the
+same reason `/api/generate` sends `context_entry`. The page appends them only for jobs it
+submitted itself: a job recovered from an earlier session is shown and played, but the
+conversation in this browser has nothing to do with it.
+
+## 13. What is deliberately not here
 
 - **Authentication, multi-user, hosting.** It is a local tool. Adding auth would imply it is
   safe to expose, which the SSRF surface and the browser-stored keys argue against.

@@ -41,10 +41,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const attachSummary = document.getElementById('attachSummary');
     const attachList = document.getElementById('attachList');
 
+    // Video. The settings block and the job list are both built at runtime, so these are
+    // the containers rather than the controls.
+    const videoGroup = document.getElementById('videoGroup');
+    const videoSettings = document.getElementById('videoSettings');
+    const videoNegative = document.getElementById('videoNegative');
+    const videoCheck = document.getElementById('videoCheck');
+    const videoFrames = document.getElementById('videoFrames');
+    const videoJobs = document.getElementById('videoJobs');
+    const videoJobList = document.getElementById('videoJobList');
+    const videoJobsSummary = document.getElementById('videoJobsSummary');
+    const refreshJobsBtn = document.getElementById('refreshJobsBtn');
+    const payloadDrawer = document.getElementById('payloadDrawer');
+
     const RESULTS_PLACEHOLDER = 'Run a prompt to see text, image, or sound results here.';
     const PAYLOAD_PLACEHOLDER = '// The serialized payload appears here after a run.';
 
     let activeModality = 'text';
+
+    // The catalog entries, whole, keyed by model id. The <option> dataset carries the flat
+    // fields it needs, but a model's `video` block is a nested object with a constraint
+    // table in it -- that does not belong in a dataset string, and the video panel reads
+    // it to build its controls.
+    const catalog = new Map();
 
     // -------------------------------------------------------------
     // 0. SMALL HELPERS
@@ -151,6 +170,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             const models = data.models || [];
 
+            catalog.clear();
+            models.forEach(m => catalog.set(m.id, m));
+
             if (models.length === 0) {
                 setSelectMessage('No models in the catalog');
                 updateSelectedService();
@@ -208,15 +230,40 @@ document.addEventListener('DOMContentLoaded', () => {
     ].filter(control => control.group && control.input && control.hint);
     samplingControls.forEach(control => { control.defaultHint = control.hint.textContent; });
 
+    // Max tokens is applicable to text and image but not to video, which is why it is
+    // kept apart from samplingControls -- those two are driven by the model's provider,
+    // this one by the modality.
+    const tokensControl = (() => {
+        const group = document.getElementById('tokensGroup');
+        const hint = document.getElementById('tokensHint');
+        if (!group || !hint) return null;
+        return { group, input: maxTokensInput, hint, defaultHint: hint.textContent };
+    })();
+
+    // Short on purpose: it is shown under three controls at once, and the video settings
+    // block above them already says what a video request does carry.
+    const VIDEO_NA_HINT = 'Not sent for a video request.';
+
     function updateSamplingEnablement() {
         const option = modelSelect.options[modelSelect.selectedIndex];
         // Default to enabled: an unknown or unselected model should not look broken.
         const honors = option?.dataset.honorsSampling !== 'false';
+        const video = activeModality === 'video';
         samplingControls.forEach(control => {
-            control.group.classList.toggle('not-applicable', !honors);
-            control.input.disabled = !honors;
-            control.hint.textContent = honors ? control.defaultHint : SAMPLING_NA_HINT;
+            // Two independent reasons a slider does nothing, and they get different
+            // wording: the provider ignores it, or this modality has no such setting.
+            const live = honors && !video;
+            control.group.classList.toggle('not-applicable', !live);
+            control.input.disabled = !live;
+            control.hint.textContent = live
+                ? control.defaultHint
+                : (video ? VIDEO_NA_HINT : SAMPLING_NA_HINT);
         });
+        if (tokensControl) {
+            tokensControl.group.classList.toggle('not-applicable', video);
+            tokensControl.input.disabled = video;
+            tokensControl.hint.textContent = video ? VIDEO_NA_HINT : tokensControl.defaultHint;
+        }
     }
 
     function selectedAcceptsImages() {
@@ -229,6 +276,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // accepts_images flag rather than the modality. Only speech takes neither.
         if (activeModality === 'sound') {
             return 'Speech generation takes no image input.';
+        }
+        if (activeModality === 'video') {
+            // Video takes its inputs BY ROLE, not as one list, so it has its own pickers
+            // below. This strip would send them as the wrong thing.
+            return 'Video takes frames by role -- use the frame pickers below the prompt.';
         }
         if (!selectedAcceptsImages()) {
             return `${modelSelect.value || 'This model'} is not registered as accepting image input.`;
@@ -274,6 +326,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         updateAttachEnablement();
         updateSamplingEnablement();
+        // The video controls are generated from the selected model's own capabilities, so
+        // they are rebuilt whenever the model changes -- not when the pill does.
+        renderVideoSettings();
+        scheduleVideoCheck();
     }
 
     modelSelect.addEventListener('change', updateSelectedService);
@@ -627,6 +683,8 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.setAttribute('aria-pressed', 'true');
             activeModality = btn.dataset.modality;
             updateAttachEnablement();
+            updateSamplingEnablement();
+            updateVideoMode();
         });
     });
 
@@ -667,6 +725,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // -------------------------------------------------------------
     // 4. EXECUTION HANDLER
     // -------------------------------------------------------------
+    // The six fields every endpoint that can carry a credential reads, matching the
+    // Credentials model on the server. Built in one place so a key typed into the sidebar
+    // reaches /api/generate and /api/video/* alike -- two copies would drift, and the
+    // symptom would be a key that works on one endpoint and is ignored on the other.
+    function credentialFields() {
+        return {
+            openrouter_key: document.getElementById('openrouterKey')?.value || null,
+            anthropic_key: document.getElementById('anthropicKey')?.value || null,
+            openai_key: document.getElementById('openaiKey')?.value || null,
+            gemini_key: document.getElementById('geminiKey')?.value || null,
+            huggingface_key: document.getElementById('huggingfaceKey')?.value || null,
+            ollama_url: document.getElementById('ollamaUrl')?.value || null,
+        };
+    }
+
     async function runExecution() {
         // The Run button is disabled mid-flight, but Ctrl+Enter is not a button.
         if (executeBtn.disabled) return;
@@ -678,6 +751,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (!modelSelect.value) {
             alert('Select a model before running.');
+            return;
+        }
+
+        // Video branches off before any of what follows. It has no history, no sampling
+        // settings, no metrics and no single result -- and it returns as soon as the job
+        // is accepted rather than when the video exists.
+        if (activeModality === 'video') {
+            executeBtn.disabled = true;
+            setStatus('busy');
+            try {
+                await submitVideo(promptText);
+            } finally {
+                setStatus('ready');
+                // Back to whatever the last check said, not unconditionally enabled: the
+                // button is the check's to control in video mode.
+                executeBtn.disabled = !videoSubmitAllowed;
+            }
             return;
         }
 
@@ -703,12 +793,7 @@ document.addEventListener('DOMContentLoaded', () => {
             temperature: parseFloat(tempSlider.value),
             top_p: parseFloat(topPSlider.value),
             max_tokens: parseInt(maxTokensInput.value, 10),
-            openrouter_key: document.getElementById('openrouterKey')?.value || null,
-            anthropic_key: document.getElementById('anthropicKey')?.value || null,
-            openai_key: document.getElementById('openaiKey')?.value || null,
-            gemini_key: document.getElementById('geminiKey')?.value || null,
-            huggingface_key: document.getElementById('huggingfaceKey')?.value || null,
-            ollama_url: document.getElementById('ollamaUrl')?.value || null,
+            ...credentialFields(),
         };
 
         try {
@@ -820,7 +905,563 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // -------------------------------------------------------------
-    // 6. PRESETS
+    // 6. VIDEO: SUBMIT, WATCH, PLAY
+    // -------------------------------------------------------------
+    // Video cannot be a request that returns its own result -- a generation runs for tens
+    // of seconds to minutes -- so this half of the page submits a job, watches it, and
+    // plays it when it lands. The job lives on the server and outlives this page, which is
+    // why the list is repopulated from the server on load rather than from local storage.
+    //
+    // The one rule that shapes everything here: no copy of the catalog's constraint table.
+    // Whether a combination is allowed is answered by /api/video/check, which runs the
+    // library's own resolve_video_request() -- the same function a real submission runs.
+    // A rule restated in this file is the one that would go stale.
+
+    // The settings this panel offers. `axis` names the capability list on the model's
+    // catalog `video` block, so the options come from the model rather than from here.
+    const VIDEO_SETTING_FIELDS = [
+        { name: 'aspect_ratio', label: 'Aspect', axis: 'aspect_ratios' },
+        { name: 'resolution', label: 'Resolution', axis: 'resolutions' },
+        { name: 'duration_seconds', label: 'Duration', axis: 'durations', numeric: true, unit: 's' },
+    ];
+
+    // The check is re-asked on every control change, so it is debounced: typing in a free
+    // text axis should send one request, not one per keystroke.
+    const VIDEO_CHECK_DEBOUNCE_MS = 250;
+
+    // How often a running job is polled. Slow on purpose -- a video takes tens of seconds
+    // at best, and the library's own note is that a five-minute job polled every ten
+    // seconds writes thirty identical records.
+    const VIDEO_POLL_MS = 4000;
+
+    // Frames by role. Deliberately not merged with `attachments`: those are reference
+    // images that go out as one list, while these are addressed by role and only one of
+    // each is meaningful.
+    const videoFrameFiles = new Map();
+
+    // What the page knows about each job, and any note to show on its card that is not
+    // part of the stored row (a transient poll failure, say).
+    const videoJobRows = new Map();
+    const videoJobNotes = new Map();
+
+    // job id -> timeout handle. Keyed so a re-render can never start a second poll loop
+    // for the same job.
+    const videoPolls = new Map();
+
+    // Jobs submitted from THIS page session. Only these may write turns into the
+    // conversation when they finish: a job recovered from a previous session is shown and
+    // played, but the conversation in this browser has nothing to do with it, and
+    // appending for it would drop a stranger's prompt into the transcript.
+    const videoWatched = new Set();
+
+    let videoCheckTimer = null;
+    let videoSubmitAllowed = false;
+
+    const RUN_LABEL = executeBtn.textContent;
+
+    function videoCapabilities() {
+        const model = catalog.get(modelSelect.value);
+        return (model && model.video) || null;
+    }
+
+    // In the library's own order, which is the order a constraint's `when` is matched
+    // against.
+    function videoRoles() {
+        return ['first_frame', 'last_frame'].filter(role => videoFrameFiles.has(role));
+    }
+
+    function videoSettingValues() {
+        const values = {};
+        VIDEO_SETTING_FIELDS.forEach(field => {
+            const el = videoSettings.querySelector(`[data-setting="${field.name}"]`);
+            const raw = el ? String(el.value).trim() : '';
+            // Empty means NOT REQUESTED: the key is left out of the request and the
+            // provider's own default applies. That is a different request from any value
+            // this page could pick, so it has to stay reachable.
+            if (!raw) return;
+            if (field.numeric) {
+                const parsed = Number(raw);
+                // A free text axis can hold anything. Send what was typed when it is not a
+                // whole number, so the server names the field rather than this page
+                // quietly sending NaN as null.
+                values[field.name] = Number.isInteger(parsed) ? parsed : raw;
+            } else {
+                values[field.name] = raw;
+            }
+        });
+        const negative = videoNegative.value.trim();
+        if (negative) values.negative_prompt = negative;
+        return values;
+    }
+
+    // Built from the model's own capability block, so a model offering different
+    // resolutions gets different options with no change here. An axis the catalog does not
+    // state becomes a FREE TEXT field rather than a disabled one: "not stated" means the
+    // provider decides, not that nothing may be asked for -- the same rule the library
+    // applies, and the check judges whatever is typed.
+    function renderVideoSettings() {
+        if (!videoSettings) return;
+        const caps = videoCapabilities();
+        const previous = videoSettingValues();
+        videoSettings.replaceChildren();
+
+        VIDEO_SETTING_FIELDS.forEach(field => {
+            const wrap = makeEl('div', 'video-field');
+            wrap.dataset.field = field.name;
+
+            const id = `video_${field.name}`;
+            const label = makeEl('label', undefined, field.label);
+            label.htmlFor = id;
+            wrap.appendChild(label);
+
+            const offered = caps ? caps[field.axis] : null;
+            let control;
+            if (Array.isArray(offered) && offered.length) {
+                control = makeEl('select', 'input-control');
+                const unset = makeEl('option', undefined, 'provider default');
+                unset.value = '';
+                control.appendChild(unset);
+                offered.forEach(value => {
+                    const option = makeEl('option', undefined,
+                        field.unit ? `${value}${field.unit}` : String(value));
+                    option.value = String(value);
+                    control.appendChild(option);
+                });
+            } else {
+                control = makeEl('input', 'input-control');
+                control.type = 'text';
+                control.placeholder = caps
+                    ? 'not stated \u2014 judged by the provider'
+                    : 'provider default';
+            }
+            control.id = id;
+            control.dataset.setting = field.name;
+            // Carried across a model change where the new model still offers it; a select
+            // simply will not hold a value the new model does not list, and the check then
+            // reports what is left.
+            if (previous[field.name] !== undefined) control.value = String(previous[field.name]);
+            control.addEventListener('change', scheduleVideoCheck);
+            control.addEventListener('input', scheduleVideoCheck);
+            wrap.appendChild(control);
+            videoSettings.appendChild(wrap);
+        });
+    }
+
+    function scheduleVideoCheck() {
+        if (videoCheckTimer) clearTimeout(videoCheckTimer);
+        videoCheckTimer = setTimeout(runVideoCheck, VIDEO_CHECK_DEBOUNCE_MS);
+    }
+
+    function setVideoCheck(message, kind, allowed) {
+        videoCheck.textContent = message;
+        videoCheck.className = `field-hint video-check ${kind}`;
+        videoSubmitAllowed = Boolean(allowed);
+        if (activeModality === 'video') executeBtn.disabled = !videoSubmitAllowed;
+    }
+
+    // What will actually be SENT, which is not always what was asked for: a catalog
+    // constraint fills a setting left unset. Saying so is the point -- otherwise the eight
+    // seconds that 1080p forces is invisible until the bill arrives.
+    function describeResolved(resolved) {
+        const asked = videoSettingValues();
+        const parts = [];
+        VIDEO_SETTING_FIELDS.forEach(field => {
+            const value = resolved[field.name];
+            if (value === undefined) return;
+            const shown = field.unit ? `${value}${field.unit}` : value;
+            parts.push(asked[field.name] === undefined
+                ? `${field.label.toLowerCase()} ${shown} (required)`
+                : `${field.label.toLowerCase()} ${shown}`);
+        });
+        if (!parts.length) {
+            return 'Ready. Nothing set, so the provider\u2019s own defaults apply.';
+        }
+        return `Ready. Will send: ${parts.join(', ')}.`;
+    }
+
+    // A setting the catalog forced, as opposed to one that was chosen. Marked on the field
+    // and the implied value written into a data attribute the stylesheet prints, rather
+    // than typed into the control: putting it in the control would make it look like the
+    // user's choice on the next check, and then a conflicting edit would read as their
+    // mistake.
+    function markForcedSettings(resolved) {
+        const asked = videoSettingValues();
+        VIDEO_SETTING_FIELDS.forEach(field => {
+            const wrap = videoSettings.querySelector(`[data-field="${field.name}"]`);
+            const label = wrap && wrap.querySelector('label');
+            if (!wrap || !label) return;
+            const value = resolved[field.name];
+            const forced = value !== undefined && asked[field.name] === undefined;
+            wrap.classList.toggle('forced', forced);
+            if (forced) {
+                label.dataset.forced = field.unit ? `${value}${field.unit}` : String(value);
+            } else {
+                delete label.dataset.forced;
+            }
+        });
+    }
+
+    async function runVideoCheck() {
+        if (activeModality !== 'video') return;
+        if (!modelSelect.value) {
+            setVideoCheck('Select a video model.', 'refused', false);
+            return;
+        }
+        const body = {
+            model: modelSelect.value,
+            roles: videoRoles(),
+            ...videoSettingValues(),
+        };
+        try {
+            const res = await fetch('/api/video/check', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                // A non-200 here means the QUESTION was malformed -- an unknown model, a
+                // misspelled role -- not that the combination was refused. Those come back
+                // as 200 with ok=false, which is the branch below.
+                markForcedSettings({});
+                setVideoCheck(formatDetail(data.detail), 'broken', false);
+                return;
+            }
+            if (!data.ok) {
+                markForcedSettings({});
+                setVideoCheck(data.detail, 'refused', false);
+                return;
+            }
+            const resolved = data.resolved || {};
+            markForcedSettings(resolved);
+            setVideoCheck(describeResolved(resolved), 'ok', true);
+        } catch (err) {
+            console.error('Could not check the video request:', err);
+            setVideoCheck(`Could not reach the server to check this: ${err.message}`,
+                'broken', false);
+        }
+    }
+
+    // -------------------------------- frames ----------------------------------
+    function renderVideoFrames() {
+        videoFrames.querySelectorAll('[data-frame-name]').forEach(node => {
+            const role = node.dataset.frameName;
+            const frame = videoFrameFiles.get(role);
+            node.textContent = frame ? frame.name : 'none';
+            node.classList.toggle('empty', !frame);
+            const clear = videoFrames.querySelector(`[data-frame-clear="${role}"]`);
+            if (clear) clear.hidden = !frame;
+        });
+    }
+
+    // Read to a data URL on pick rather than at submit, so submitting stays synchronous
+    // and an unreadable file is reported while the user is still looking at the picker.
+    function setVideoFrame(role, file) {
+        if (file.size > MAX_IMAGE_BYTES) {
+            alert(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB, over the `
+                + `${MAX_IMAGE_BYTES / 1048576} MB per-image limit.`);
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+            videoFrameFiles.set(role, {
+                data_url: reader.result, name: file.name, bytes: file.size,
+            });
+            renderVideoFrames();
+            scheduleVideoCheck();
+        };
+        reader.onerror = () => alert(`Could not read ${file.name}.`);
+        reader.readAsDataURL(file);
+    }
+
+    videoFrames.querySelectorAll('[data-frame-pick]').forEach(button => {
+        const role = button.dataset.framePick;
+        button.addEventListener('click', () => {
+            videoFrames.querySelector(`[data-frame-input="${role}"]`)?.click();
+        });
+    });
+
+    videoFrames.querySelectorAll('[data-frame-input]').forEach(input => {
+        const role = input.dataset.frameInput;
+        input.addEventListener('change', () => {
+            if (input.files && input.files[0]) setVideoFrame(role, input.files[0]);
+            // Cleared so picking the same file twice in a row still fires a change.
+            input.value = '';
+        });
+    });
+
+    videoFrames.querySelectorAll('[data-frame-clear]').forEach(button => {
+        const role = button.dataset.frameClear;
+        button.addEventListener('click', () => {
+            videoFrameFiles.delete(role);
+            renderVideoFrames();
+            scheduleVideoCheck();
+        });
+    });
+
+    // ------------------------------- the jobs ---------------------------------
+    function videoExtension(mime) {
+        const known = {
+            'video/mp4': '.mp4', 'video/quicktime': '.mov', 'video/webm': '.webm',
+        };
+        return known[String(mime || '').toLowerCase()] || '.mp4';
+    }
+
+    function upsertJob(job) {
+        videoJobRows.set(job.id, job);
+        // A fresh row supersedes whatever transient note was on the card.
+        videoJobNotes.delete(job.id);
+        renderVideoJobs();
+    }
+
+    function noteOnJob(jobId, message, kind) {
+        videoJobNotes.set(jobId, { message, kind });
+        renderVideoJobs();
+    }
+
+    function buildJobCard(job) {
+        const card = makeEl('div', 'video-job');
+
+        const head = makeEl('div', 'video-job-head');
+        head.appendChild(makeEl('span', 'video-job-model', job.model));
+        head.appendChild(makeEl('span', `video-job-state ${job.state}`, job.state));
+        head.appendChild(makeEl('span', 'video-job-meta',
+            // Null when the job was resumed from a bare operation id and nobody knows when
+            // it started. Reported as unknown rather than as zero.
+            job.elapsed_s === null || job.elapsed_s === undefined
+                ? 'age unknown'
+                : `${Number(job.elapsed_s).toFixed(1)}s`));
+        card.appendChild(head);
+
+        card.appendChild(makeEl('div', 'video-job-prompt', job.prompt));
+
+        const settings = Object.entries(job.requested || {})
+            .map(([name, value]) => `${name}: ${value}`).join('   \u00b7   ');
+        if (settings) card.appendChild(makeEl('div', 'video-job-settings', settings));
+
+        if (job.video_url) {
+            const player = document.createElement('video');
+            player.className = 'result-video';
+            player.controls = true;
+            // Not autoplay and not preload="auto": a clip is tens of megabytes, and a page
+            // holding several finished jobs would fetch all of them on render.
+            player.preload = 'metadata';
+            player.src = job.video_url;
+            card.appendChild(player);
+
+            const download = makeEl('a', 'btn-secondary', 'Download video');
+            download.href = job.video_url;
+            // The endpoint deliberately sends no Content-Disposition, so that the same URL
+            // can be played inline. The filename belongs here instead.
+            download.download =
+                `${job.model}-${String(job.id).slice(0, 8)}${videoExtension(job.mime_type)}`;
+            card.appendChild(download);
+        }
+
+        if (job.state === 'failed' && job.error) {
+            card.appendChild(makeEl('div', 'video-job-note failed', job.error));
+        }
+        if (job.state === 'filtered') {
+            const reasons = (job.filtered_reasons || []).join(', ');
+            card.appendChild(makeEl('div', 'video-job-note filtered',
+                reasons ? `Filtered by the provider: ${reasons}` : 'Filtered by the provider.'));
+        }
+        const note = videoJobNotes.get(job.id);
+        if (note) card.appendChild(makeEl('div', `video-job-note ${note.kind}`, note.message));
+
+        return card;
+    }
+
+    function renderVideoJobs() {
+        const jobs = [...videoJobRows.values()]
+            .sort((a, b) => (b.submitted_at || 0) - (a.submitted_at || 0));
+        videoJobList.replaceChildren(...jobs.map(buildJobCard));
+
+        const running = jobs.filter(job => job.state === 'running').length;
+        videoJobsSummary.textContent = jobs.length === 0
+            ? 'no jobs yet'
+            : `${jobs.length} job${jobs.length === 1 ? '' : 's'}`
+            + (running ? `, ${running} running` : '');
+    }
+
+    function stopPolling(jobId) {
+        const handle = videoPolls.get(jobId);
+        if (handle) clearTimeout(handle);
+        videoPolls.delete(jobId);
+    }
+
+    function schedulePoll(jobId) {
+        stopPolling(jobId);
+        videoPolls.set(jobId, setTimeout(() => pollJob(jobId), VIDEO_POLL_MS));
+    }
+
+    // A job this page submitted has finished. Appending is gated on having submitted it
+    // here -- see videoWatched.
+    function finishWatching(job) {
+        if (!videoWatched.has(job.id)) return;
+        videoWatched.delete(job.id);
+        if (!appendContextToggle.checked) {
+            console.info('Not appending the video turn: "Append responses" is off.');
+            return;
+        }
+        // Null for a failed or filtered job: a generation that produced nothing must not
+        // enter the transcript, which is the rule the text path already follows. The
+        // server decides, so there is one definition of what the turn says.
+        if (!job.transcript_entries) return;
+        job.transcript_entries.forEach(entry => conversation.push(entry));
+        saveContext();
+        renderContext();
+    }
+
+    async function pollJob(jobId) {
+        stopPolling(jobId);
+        try {
+            const res = await fetch(`/api/video/jobs/${encodeURIComponent(jobId)}/poll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                // A key typed into the sidebar is never stored with the job, so a poll
+                // after a restart has to carry it again. That is also why this is a POST:
+                // a credential does not belong in a URL.
+                body: JSON.stringify(credentialFields()),
+            });
+            const data = await res.json();
+
+            if (res.status === 503) {
+                // The server says so in as many words: the job is still running and
+                // polling again is safe. A note on the card, not a failure.
+                noteOnJob(jobId, formatDetail(data.detail), 'transient');
+                schedulePoll(jobId);
+                return;
+            }
+            if (!res.ok) {
+                // 410 expired, 400 missing credential, 404 unknown id. None of them
+                // improve by asking again, so the loop stops and the card says why.
+                noteOnJob(jobId, formatDetail(data.detail), 'failed');
+                // The row may have changed -- a 410 is recorded as failed server-side --
+                // so read it back rather than leaving the card claiming it is running.
+                try {
+                    const fresh = await fetch(`/api/video/jobs/${encodeURIComponent(jobId)}`);
+                    if (fresh.ok) {
+                        const row = await fresh.json();
+                        videoJobRows.set(row.id, row);
+                        renderVideoJobs();
+                    }
+                } catch (err) {
+                    console.warn('Could not re-read the job row:', err);
+                }
+                return;
+            }
+
+            upsertJob(data);
+            if (data.state === 'running') {
+                schedulePoll(jobId);
+            } else {
+                finishWatching(data);
+            }
+        } catch (err) {
+            // A dropped connection, not a verdict about the job.
+            console.error(`Polling video job ${jobId} failed:`, err);
+            noteOnJob(jobId, `Could not reach the server: ${err.message}`, 'transient');
+            schedulePoll(jobId);
+        }
+    }
+
+    // The page's half of surviving a restart: the server kept the job, and this is what
+    // finds it again -- including one that finished while the page was closed. Called on
+    // load whatever modality is active, because a job left running should be collected
+    // regardless of which pill happens to be selected.
+    async function loadVideoJobs() {
+        try {
+            const res = await fetch('/api/video/jobs');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const jobs = data.jobs || [];
+            videoJobRows.clear();
+            jobs.forEach(job => videoJobRows.set(job.id, job));
+            renderVideoJobs();
+            jobs.filter(job => job.state === 'running')
+                .forEach(job => schedulePoll(job.id));
+        } catch (err) {
+            console.error('Could not load video jobs:', err);
+            videoJobsSummary.textContent = 'could not reach the server';
+        }
+    }
+
+    async function submitVideo(promptText) {
+        const payload = {
+            model: modelSelect.value,
+            prompt: promptText,
+            ...videoSettingValues(),
+            ...credentialFields(),
+        };
+        const first = videoFrameFiles.get('first_frame');
+        const last = videoFrameFiles.get('last_frame');
+        if (first) payload.first_frame = { data_url: first.data_url, name: first.name };
+        if (last) payload.last_frame = { data_url: last.data_url, name: last.name };
+
+        try {
+            const res = await fetch('/api/video/submit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                // Left submittable on purpose. The check judges the COMBINATION and not
+                // the frames, so a refusal here is often about a frame -- and disabling Run
+                // would leave no way to retry after replacing it.
+                setVideoCheck(`Submission refused: ${formatDetail(data.detail)}`,
+                    'broken', true);
+                return;
+            }
+            upsertJob(data);
+            videoWatched.add(data.id);
+            schedulePoll(data.id);
+            setVideoCheck('Submitted. Watching it below.', 'ok', true);
+        } catch (err) {
+            console.error('Video submission failed:', err);
+            setVideoCheck(`Could not reach the server: ${err.message}`, 'broken', true);
+        }
+    }
+
+    function updateVideoMode() {
+        const video = activeModality === 'video';
+
+        videoGroup.classList.toggle('hidden', !video);
+        videoFrames.classList.toggle('hidden', !video);
+        videoJobs.classList.toggle('hidden', !video);
+
+        // The single-shot panes describe a call that returned something. A submitted job
+        // has not, so they are put away rather than left showing the last text run's
+        // numbers underneath a video. Metrics are only ever ADDED to here: renderResults
+        // reveals them on the next run that has any.
+        attachRow.classList.toggle('hidden', video);
+        attachList.classList.toggle('hidden', video);
+        resultsContainer.classList.toggle('hidden', video);
+        if (payloadDrawer) payloadDrawer.classList.toggle('hidden', video);
+        if (video) metricsBar.classList.add('hidden');
+
+        // "Run" overstates what the button does here: it submits and returns, and the
+        // video arrives minutes later.
+        executeBtn.textContent = video ? 'Submit video' : RUN_LABEL;
+
+        if (video) {
+            renderVideoFrames();
+            renderVideoSettings();
+            runVideoCheck();
+        } else {
+            executeBtn.disabled = false;
+        }
+    }
+
+    refreshJobsBtn.addEventListener('click', loadVideoJobs);
+    videoNegative.addEventListener('input', scheduleVideoCheck);
+
+    renderVideoFrames();
+    loadVideoJobs();
+
+    // -------------------------------------------------------------
+    // 7. PRESETS
     // -------------------------------------------------------------
     const PRESETS = {
         text: {
@@ -842,6 +1483,14 @@ document.addEventListener('DOMContentLoaded', () => {
             system: 'Generate audio synthesis text.',
             prompt: 'Attention passengers, flight 402 to Tokyo is now boarding at Gate 14.',
             modality: 'sound',
+        },
+        video: {
+            // The system instruction is not part of a video request; it is set anyway so
+            // switching back to a text preset does not inherit a blank one.
+            system: 'You are a helpful assistant.',
+            prompt: 'A slow aerial push-in over a misty pine forest at dawn, low sun '
+                + 'breaking through the trees.',
+            modality: 'video',
         },
     };
 
