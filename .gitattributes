@@ -1,3 +1,13 @@
+# Normalize text files to LF in the repository, whatever the working tree holds. Without
+# this, a Windows editor that writes CRLF makes every file it touches look wholly rewritten
+# -- a one-line change arrives as a 900-line diff, and a review of it is worthless. Git
+# decides what counts as text, so binaries are left alone.
+#
+# This governs what is STORED. What is checked out is still each developer's own business
+# (core.eol, core.autocrlf), which is the point: work in CRLF on Windows if you like, and
+# the repository stays LF either way.
+* text=auto
+
 # Git hooks must be LF in the working tree on every platform. A hook checked out with CRLF
 # fails as "bad interpreter: /bin/sh^M", which reads as a broken script rather than as a
 # line-ending problem and costs an hour to recognise. core.autocrlf is not set anywhere in

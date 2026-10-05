@@ -300,8 +300,8 @@ wheels = [
 
 [[package]]
 name = "corbelity-model-client"
-version = "0.4.0"
-source = { git = "https://github.com/Corbelity/model-client#d97545e880aabeb28657fdc8beaa215897991425" }
+version = "0.5.0"
+source = { git = "https://github.com/Corbelity/model-client#98eab3205c90e9165d56a6baeef81b5d5887bd47" }
 
 [package.optional-dependencies]
 all = [

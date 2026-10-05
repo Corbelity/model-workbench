@@ -24,12 +24,19 @@ from urllib.parse import urlparse
 
 import httpx
 from corbelity.model_client import (
+    EXTEND,
+    FIRST_FRAME,
     IMAGE,
+    LAST_FRAME,
+    REFERENCES,
     SOUND,
     SUPPORTED_IMAGE_MIMES,
     TEXT,
     VIDEO,
+    VIDEO_FAILED,
     VIDEO_ROLES,
+    VIDEO_SUCCEEDED,
+    VIDEO_TERMINAL_STATES,
     ImageInput,
     MediaResult,
     ModelCatalog,
@@ -988,43 +995,19 @@ def generate(req: GenerateRequest):
 #   * Credentials are per-request and never stored, which is what makes a restart only
 #     partly recoverable. Said plainly at poll_video_job() rather than worked around.
 
-# The library's role names. corbelity.model_client exports the VIDEO_ROLES tuple but not
-# the individual names, so they are spelled out here -- and then derived back through
-# VIDEO_ROLES below, which is what makes a rename in the library a loud failure instead of
-# a role that silently never matches a constraint again.
-FIRST_FRAME = "first_frame"
-LAST_FRAME = "last_frame"
-REFERENCES = "references"
-
-# The roles this interface can supply, in the library's own order, which is the order a
-# catalog constraint's `when` is matched against.
+# The roles this interface can supply, in the library's own order -- which is the order a
+# catalog constraint's `when` is matched against. Subtracted from VIDEO_ROLES rather than
+# listed, so a role the library adds is a deliberate decision here rather than a silent
+# omission.
 #
-# `extend` is the one role deliberately left out. It takes a provider-side handle to a
-# clip that same service generated and still holds -- not an upload -- so it means
-# chaining a previous job's result, which needs a control this panel does not have yet.
-# `references` IS accepted even though the shipped catalog refuses it for every video
-# model it lists, because that refusal belongs to the catalog: when model-client enables
-# references, this starts working with no edit here, and until then the user gets the
-# library's own message naming what the model does take.
-VIDEO_INPUT_ROLES = tuple(
-    role for role in VIDEO_ROLES if role in {FIRST_FRAME, LAST_FRAME, REFERENCES}
-)
-if len(VIDEO_INPUT_ROLES) != 3:
-    # Not an assert: this must hold under -O as well. A library rename here would
-    # otherwise quietly remove a frame control rather than failing the launch.
-    raise RuntimeError(
-        "corbelity.model_client no longer names the video input roles this workbench "
-        f"supplies; it offers {VIDEO_ROLES!r}. The frame controls need updating."
-    )
-
-# The library's VideoState values. Not exported either -- its public surface for state is
-# the VideoStatus dataclass and its `done` property -- so these are pinned by a test that
-# round-trips each one through VideoStatus.done rather than by an import.
-VIDEO_RUNNING = "running"
-VIDEO_SUCCEEDED = "succeeded"
-VIDEO_FAILED = "failed"
-VIDEO_FILTERED = "filtered"
-VIDEO_TERMINAL = frozenset({VIDEO_SUCCEEDED, VIDEO_FAILED, VIDEO_FILTERED})
+# `extend` is the one role left out. It takes a provider-side handle to a clip that same
+# service generated and still holds -- not an upload -- so it means chaining a previous
+# job's result, which needs a control this panel does not have yet. `references` IS
+# accepted even though the shipped catalog refuses it for every video model it lists,
+# because that refusal belongs to the catalog: when model-client enables references, this
+# starts working with no edit here, and until then the user gets the library's own message
+# naming what the model does take.
+VIDEO_INPUT_ROLES = tuple(role for role in VIDEO_ROLES if role != EXTEND)
 
 # How many recent jobs the page is offered when it loads and looks for what it was
 # watching.
@@ -1360,7 +1343,7 @@ def poll_video_job(job_id: str, req: VideoPollRequest):
     row = videostore.get_job(job_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"No video job {job_id!r}.")
-    if row["state"] in VIDEO_TERMINAL:
+    if row["state"] in VIDEO_TERMINAL_STATES:
         return public_job(row)
 
     service = row["service"]
