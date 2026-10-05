@@ -27,7 +27,7 @@ classifiers = [
 # The workbench installs every provider SDK (the `all` extra) because the UI offers every
 # provider. Someone who only wants one can depend on corbelity-model-client directly.
 dependencies = [
-    "corbelity-model-client[all]>=0.4.0",
+    "corbelity-model-client[all]>=0.5.0",
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "httpx>=0.27",
@@ -51,8 +51,18 @@ dev = [
 
 # This is the committable form: until model-client is on PyPI, uv resolves it from GitHub.
 # The version floor in [project.dependencies] is checked against whatever this ref
-# provides, so bumping the floor also means relocking (`uv lock`) against a ref that has
-# it. Developing both repos side by side? Swap in the sibling checkout, and swap it back
+# provides, so bumping the floor also means relocking against a ref that has it:
+#
+#   uv lock && uv sync
+#
+# A plain `uv lock` may resolve to the commit it saw last, because uv caches git refs --
+# so a floor bump can fail with the dependency still at the old version, which reads as a
+# broken release rather than a stale cache. That has now happened three times. When the
+# lock does not move, name the package:
+#
+#   uv lock --upgrade-package corbelity-model-client && uv sync
+#
+# Developing both repos side by side? Swap in the sibling checkout, and swap it back
 # before opening a PR -- a local path breaks a fresh clone and fails CI at `uv sync`:
 #   corbelity-model-client = { path = "../model-client", editable = true }
 [tool.uv.sources]

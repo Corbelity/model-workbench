@@ -16,7 +16,9 @@ import time
 
 import pytest
 from corbelity.model_client import (
+    EXTEND,
     VIDEO_ROLES,
+    VIDEO_TERMINAL_STATES,
     MediaResult,
     VideoJobNotFoundError,
     VideoJobRef,
@@ -255,8 +257,8 @@ def test_extend_is_not_offered_by_this_interface(client):
     """The library knows the role; this panel has no control for it, because it needs a
     handle to a clip the service itself generated rather than an upload. Refused by name
     here rather than passed down to fail less clearly."""
-    assert "extend" in VIDEO_ROLES
-    assert "extend" not in workbench.VIDEO_INPUT_ROLES
+    assert EXTEND in VIDEO_ROLES
+    assert EXTEND not in workbench.VIDEO_INPUT_ROLES
     response = client.post("/api/video/check", json={"model": VEO, "roles": ["extend"]})
     assert response.status_code == 400
 
@@ -290,21 +292,16 @@ def test_the_settings_model_matches_the_library_options():
     assert set(workbench.VideoSettings.model_fields) == set(VideoOptions.__dataclass_fields__)
 
 
-def test_the_role_names_match_the_library():
-    """corbelity.model_client exports VIDEO_ROLES but not the individual names, so they
-    are spelled out in app.py. This is what catches a rename there."""
-    assert set(workbench.VIDEO_INPUT_ROLES) < set(VIDEO_ROLES)
-    offered = tuple(role for role in VIDEO_ROLES if role != "extend")
+def test_this_interface_offers_every_role_but_extend():
+    """The roles are the library's own names now (0.5.0 exports them), so there is nothing
+    left to assert about spelling -- a rename there is an ImportError here. What remains is
+    this workbench's decision: everything VIDEO_ROLES holds except `extend`, which needs a
+    previous job's handle rather than an upload. A role the library ADDS shows up here
+    automatically, which is the intent -- the catalog then judges whether a model takes
+    it."""
+    offered = tuple(role for role in VIDEO_ROLES if role != EXTEND)
     assert offered == workbench.VIDEO_INPUT_ROLES
-
-
-def test_the_job_states_match_the_library():
-    """No state constants are exported either -- the library's public surface for state is
-    VideoStatus and its `done` property -- so each spelled-out value is round-tripped
-    through it. A renamed state makes `done` disagree and fails here."""
-    assert VideoStatus(state=workbench.VIDEO_RUNNING, elapsed_s=None).done is False
-    for state in workbench.VIDEO_TERMINAL:
-        assert VideoStatus(state=state, elapsed_s=None).done is True
+    assert set(workbench.VIDEO_INPUT_ROLES) < set(VIDEO_ROLES)
 
 
 def test_every_mapped_ui_field_exists_on_the_credentials_model():
@@ -389,16 +386,23 @@ def test_polling_reports_running_then_stores_the_finished_video(client, provider
     assert written[0].read_bytes() == MP4
 
 
-def test_a_finished_job_is_answered_from_the_table(client, provider):
+@pytest.mark.parametrize("state", sorted(VIDEO_TERMINAL_STATES))
+def test_a_finished_job_is_answered_from_the_table(client, provider, state):
     """The library's own job finalizes once and then serves from its cache; this is that
     contract carried across a restart. Polling a finished job must not contact the
-    provider -- or cost anything."""
+    provider -- or cost anything.
+
+    Over every terminal state the library defines, rather than just the happy one: a
+    failed or filtered job is equally finished, and is the easier one to leave polling
+    for ever by accident. Taking the set from the library means a state added there is
+    covered here without an edit."""
+    provider.states = [state]
     job = submit(client)
     client.post(f"/api/video/jobs/{job['id']}/poll", json={})
     after_first = provider.polls
 
     again = client.post(f"/api/video/jobs/{job['id']}/poll", json={}).json()
-    assert again["state"] == "succeeded"
+    assert again["state"] == state
     assert provider.polls == after_first
 
 
