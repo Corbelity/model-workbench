@@ -732,8 +732,12 @@ a.btn-secondary {
     padding: 0;
 }
 
+/* A utility class, so it has to win. Without !important it is beaten by every rule with a
+   `display` defined further down this file -- .attach-row and .video-frames among them --
+   at the same specificity, purely because of position. That made `hidden` work on some
+   elements and silently do nothing on others. */
 .hidden {
-    display: none;
+    display: none !important;
 }
 
 /* ---------------------------------------------------------------- */
@@ -968,8 +972,208 @@ a.btn-secondary {
 
 .attach-remove:hover { color: var(--danger); }
 
+/* ---------------------------------------------------------------------------
+   VIDEO
+   Video is the one modality that is submitted rather than awaited, so it needs two
+   things nothing else here does: a settings block generated from what the selected
+   model says it can do, and a list of jobs that outlive the page. Both are built from
+   the existing tokens -- no new colours, and the state chips reuse --accent, --warn
+   and --danger so a running job never reads as a warning.
+   --------------------------------------------------------------------------- */
+.video-settings {
+    display: grid;
+    /* Two across in the sidebar at its usual width, one when it is narrow. The axes are
+       generated, so this must not assume how many there are. */
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+}
+
+.video-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.video-field label {
+    margin: 0;
+    font-size: 0.75rem;
+}
+
+/* A setting a constraint forced, rather than one that was asked for. Marked so the value
+   in the box is visibly not the user's choice -- otherwise a duration that appeared on
+   its own looks like a control that changed itself. */
+/* The value a constraint forced, printed beside the label rather than typed into the
+   control. In the control it would look like the user's own choice on the next check, and
+   a later conflicting edit would then read as their mistake. */
+.video-field.forced label::after {
+    content: ' = ' attr(data-forced) ' (required)';
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.video-field.forced select,
+.video-field.forced input {
+    border-color: var(--accent-line);
+}
+
+/* The answer from /api/video/check. Always present in the layout once video is active,
+   so an appearing refusal never shifts the controls under the pointer. */
+.video-check {
+    min-height: 1.2em;
+    margin-top: var(--space-2);
+}
+
+.video-check.ok { color: var(--text-muted); }
+.video-check.refused { color: var(--warn); }
+.video-check.broken { color: var(--danger); }
+
+/* -------------------------------- frames ---------------------------------- */
+.video-frames {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+}
+
+.video-frame {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.video-frame-role {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.video-frame-name {
+    font-size: 0.8rem;
+    color: var(--text-main);
+    max-width: 14ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.video-frame-name.empty { color: var(--text-muted); font-style: italic; }
+
+/* ------------------------------- job list --------------------------------- */
+.video-jobs {
+    margin-top: var(--space-3);
+}
+
+.video-jobs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+}
+
+.video-job-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.video-job {
+    padding: var(--space-3);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.video-job-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-2);
+}
+
+.video-job-model {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.video-job-state {
+    padding: 2px var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid currentColor;
+}
+
+.video-job-state.running { color: var(--accent); }
+.video-job-state.succeeded { color: var(--accent); border-color: var(--accent-line); }
+.video-job-state.failed,
+.video-job-state.expired { color: var(--danger); }
+.video-job-state.filtered { color: var(--warn); }
+
+/* A running job breathes, so a page left open plainly is not stuck. Suppressed under
+   prefers-reduced-motion by the rule at the end of this file. */
+.video-job-state.running {
+    animation: video-pulse 2s ease-in-out infinite;
+}
+
+@keyframes video-pulse {
+    50% { opacity: 0.5; }
+}
+
+.video-job-meta {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.video-job-prompt {
+    font-size: 0.85rem;
+    color: var(--text-main);
+    margin-bottom: var(--space-2);
+    overflow-wrap: anywhere;
+}
+
+.video-job-settings {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-2);
+}
+
+.video-job-note {
+    font-size: 0.82rem;
+    overflow-wrap: anywhere;
+}
+
+.video-job-note.failed { color: var(--danger); }
+.video-job-note.filtered { color: var(--warn); }
+.video-job-note.transient { color: var(--warn); }
+
+.result-video {
+    display: block;
+    width: 100%;
+    max-height: 60vh;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
     * {
         transition: none !important;
+        /* Animations too, not just transitions: the running-job chip pulses, and a
+           pulsing badge is exactly what this preference is asking to be spared. */
+        animation: none !important;
     }
 }

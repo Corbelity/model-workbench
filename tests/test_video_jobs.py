@@ -643,3 +643,64 @@ def test_the_schema_follows_the_configured_directory(tmp_path, monkeypatch):
     assert videostore.get_job("k8") is None
     videostore.record_submission("k8", ref(), prompt="x")
     assert videostore.get_job("k8")["state"] == "running"
+
+
+# --------------------------------------------------------------------------- #
+# the transcript
+# --------------------------------------------------------------------------- #
+def test_a_succeeded_job_carries_the_turns_to_append(client, provider):
+    """Formatted server-side for the same reason /api/generate sends context_entry: one
+    definition, rather than a copy in JS that drifts."""
+    job = submit(client)
+    polled = client.post(f"/api/video/jobs/{job['id']}/poll", json={}).json()
+    user, assistant = polled["transcript_entries"]
+    assert user == {"role": "user", "content": "a corbel bracket, slowly rotating"}
+    assert assistant["role"] == "assistant"
+    assert assistant["content"] == (
+        '[video generated: "a corbel bracket, slowly rotating"]')
+
+
+def test_the_frames_used_are_named_in_the_transcript(client, provider):
+    """Without this the turn claims the clip came from the prompt alone, which is the
+    wrong thing to read back when working out why two generations differ."""
+    png = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+           "2mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==")
+    job = submit(client, first_frame={"data_url": png, "name": "open.png"})
+    polled = client.post(f"/api/video/jobs/{job['id']}/poll", json={}).json()
+    user, assistant = polled["transcript_entries"]
+    assert user["content"].endswith("[first frame attached]")
+    assert assistant["content"].endswith("[reference: first frame]")
+
+
+def test_an_unfinished_or_failed_job_has_no_turns(client, provider):
+    """A failed generation must not enter the transcript -- the rule the text path
+    follows. Neither must one that has not finished."""
+    provider.states = ["running"]
+    job = submit(client)
+    assert job["transcript_entries"] is None
+    running = client.post(f"/api/video/jobs/{job['id']}/poll", json={}).json()
+    assert running["transcript_entries"] is None
+
+    provider.states = ["failed"]
+    assert client.post(f"/api/video/jobs/{job['id']}/poll",
+                       json={}).json()["transcript_entries"] is None
+
+
+def test_video_is_never_labelled_audio_in_a_placeholder():
+    """The guard on the bug this replaced: the old `"image" if IMAGE else "audio"` would
+    have called a video an audio clip, and would have done the same to whatever modality
+    came after video."""
+    assert workbench.media_placeholder("video", "a drone shot").startswith(
+        '[video generated:')
+    assert workbench.media_placeholder("sound", "hello").startswith('[audio generated:')
+    assert workbench.media_placeholder("image", "a cabin").startswith('[image generated:')
+    # An unrecognised modality names itself rather than borrowing another's name.
+    assert workbench.media_placeholder("hologram", "x").startswith('[hologram generated:')
+
+
+def test_an_explicit_detail_wins_over_images():
+    """A video job holds role names, not the frames -- so the caller passes the detail
+    rather than synthesising ImageInputs just to be described."""
+    entry = workbench.media_placeholder(
+        "video", "a slow pan", detail="first frame, last frame")
+    assert entry.endswith("[reference: first frame, last frame]")

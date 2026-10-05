@@ -20,6 +20,16 @@ overriding them is a supported thing to do.
 
 Everything below becomes `0.1.0` when the first tag is cut.
 
+### Fixed
+
+- A generated video was described as audio in the conversation transcript.
+  `media_placeholder()` chose its label with `"image" if modality == IMAGE else "audio"`,
+  so every modality that was not image became "audio". It is a lookup now, and an
+  unrecognised modality names itself instead of borrowing another's name.
+- `.hidden` could be overridden by any rule with a `display` defined later in
+  `style.css` at the same specificity, so the utility class worked on some elements and
+  silently did nothing on others.
+
 ### Added
 
 - Video generation (SA-381). Video is submit-then-poll rather than request-response, so it
@@ -37,6 +47,11 @@ Everything below becomes `0.1.0` when the first tag is cut.
   recoverable: restart the server mid-generation, reopen the page, and the job is found and
   finished. A credential is never stored, so a job polled after a restart needs its key
   sent again or set in the environment. See DESIGN.md §12.
+- The video panel (SA-381). A `Video` modality pill, settings generated from the selected
+  model's catalog capabilities rather than hard-coded, frame pickers by role, a live
+  validity check that shows the library's own refusal and reveals a setting a constraint
+  forces, and a job list that plays the finished clip. The list is repopulated from the
+  server on load, so a generation interrupted by a restart is picked back up and played.
 - `WORKBENCH_VIDEO_DIR` names where video jobs and their clips are kept. Defaults to
   `media/video`, relative to the launch directory.
 - OpenAI and Gemini support, following the providers added to

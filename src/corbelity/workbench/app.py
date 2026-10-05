@@ -527,8 +527,16 @@ def normalize_attachments(attachments: list[ImageAttachment],
     return resolved
 
 
+# What each generated modality is called in the transcript. A map rather than the
+# conditional this replaced -- `"image" if modality == IMAGE else "audio"` -- which
+# labelled a video "audio", and would have labelled whatever comes after video "audio"
+# too. An unrecognised modality now names itself rather than borrowing a name.
+MEDIA_KINDS = {IMAGE: "image", SOUND: "audio", VIDEO: "video"}
+
+
 def media_placeholder(modality: str, prompt: str,
-                      images: list[ImageInput] | None = None) -> str:
+                      images: list[ImageInput] | None = None,
+                      *, detail: str | None = None) -> str:
     """What a media generation leaves in the conversation. The payload itself can't go
     there -- a data URL can't be replayed to a text model and would swamp localStorage
     (one generated PNG measured 1.68 MB) -- so the transcript records that it happened.
@@ -536,15 +544,21 @@ def media_placeholder(modality: str, prompt: str,
 
     Reference images are named for the same reason the prompt is: without them the turn
     claims the image came from the prompt alone, which is the wrong thing to read back
-    when you are working out why two generations differ."""
+    when you are working out why two generations differ.
+
+    `detail` names the inputs directly, for a caller holding role names rather than
+    images: a video job records WHICH roles it was given, not the frames themselves --
+    those are the user's files, already on their disk. It wins over `images` when both are
+    supplied."""
     trimmed = prompt.strip()
     if len(trimmed) > MEDIA_PLACEHOLDER_PROMPT_CHARS:
         trimmed = trimmed[:MEDIA_PLACEHOLDER_PROMPT_CHARS] + "…"
-    kind = "image" if modality == IMAGE else "audio"
+    kind = MEDIA_KINDS.get(modality, modality)
     entry = f'[{kind} generated: "{trimmed}"]'
-    if images:
+    if detail is None and images:
         named = [image.name for image in images if image.name]
         detail = ", ".join(named) if named else f"{len(images)} image(s)"
+    if detail:
         entry += f"\n[reference: {detail}]"
     return entry
 
@@ -1173,6 +1187,11 @@ def video_inputs(req: VideoSubmitRequest,
     )
 
 
+# Role names as a transcript says them, rather than as the API spells them.
+VIDEO_ROLE_LABELS = {FIRST_FRAME: "first frame", LAST_FRAME: "last frame",
+                     REFERENCES: "reference images"}
+
+
 def public_job(row: Mapping[str, Any]) -> dict[str, Any]:
     """A stored job as the browser sees it.
 
@@ -1200,6 +1219,22 @@ def public_job(row: Mapping[str, Any]) -> dict[str, Any]:
     else:
         end = finished if finished is not None else time.time()
         record["elapsed_s"] = round(max(0.0, end - submitted), 1)
+
+    # The two turns to append to the conversation, formatted here for the same reason
+    # /api/generate sends context_entry rather than letting the page build one: a single
+    # definition. Only on success -- a failed or filtered generation must not enter the
+    # transcript, which is the rule the text path already follows.
+    if row["state"] == VIDEO_SUCCEEDED:
+        used = ", ".join(VIDEO_ROLE_LABELS.get(role, role) for role in row["roles"])
+        prompt = row["prompt"]
+        record["transcript_entries"] = [
+            {"role": "user",
+             "content": f"{prompt}\n[{used} attached]" if used else prompt},
+            {"role": "assistant",
+             "content": media_placeholder(VIDEO, prompt, detail=used or None)},
+        ]
+    else:
+        record["transcript_entries"] = None
     return record
 
 

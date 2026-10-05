@@ -217,6 +217,25 @@ environment variable. Nothing else about the job is lost.
 Video is absent from `GENERATE_MODALITIES` for this reason and not because it is
 unsupported, so `/api/generate` names where it does belong rather than only saying no.
 
+The panel follows from the same decision. Its settings are **generated from the selected
+model's catalog `video` block**, which `/api/models` already publishes — `ModelInfo.video`
+is a dataclass, so the `asdict()` already there recurses into it. Nothing about which
+resolutions or durations exist is written in the page. An axis the catalog does not state
+becomes a free-text field rather than a disabled one, because "not stated" means the
+provider decides, not that nothing may be asked for.
+
+Nothing in the page restates a constraint. Whether a last frame needs a first frame, or
+1080p forces eight seconds, is answered by `/api/video/check` on every control change —
+so the refusal the user reads is the library's own sentence. A forced value is printed
+*beside* its control rather than typed into it: in the control it would look like the
+user's own choice on the next check, and a later conflicting edit would then read as
+their mistake.
+
+A job carries its own transcript turns (`transcript_entries`, on success only), for the
+same reason `/api/generate` sends `context_entry`. The page appends them only for jobs it
+submitted itself: a job recovered from an earlier session is shown and played, but the
+conversation in this browser has nothing to do with it.
+
 ## 13. What is deliberately not here
 
 - **Authentication, multi-user, hosting.** It is a local tool. Adding auth would imply it is
